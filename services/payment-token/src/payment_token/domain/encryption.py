@@ -1,0 +1,260 @@
+"""Encryption and key derivation functions for payment token service.
+
+This module implements HKDF-based key derivation and AES-GCM encryption
+for secure payment data handling. All cryptographic operations follow
+PCI DSS requirements and industry best practices.
+"""
+
+import logging
+import os
+from typing import NamedTuple
+
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+
+logger = logging.getLogger(__name__)
+
+
+class EncryptionError(Exception):
+    """Base exception for encryption-related errors."""
+
+    pass
+
+
+class DecryptionError(Exception):
+    """Exception raised when decryption fails."""
+
+    pass
+
+
+class EncryptedData(NamedTuple):
+    """Container for encrypted data and associated metadata."""
+
+    ciphertext: bytes
+    nonce: bytes  # Initialization vector for AES-GCM
+
+
+def derive_device_key(bdk: bytes, device_token: str) -> bytes:
+    """Derive device-specific encryption key from BDK using HKDF.
+
+    This function implements RFC 5869 HKDF (HMAC-based Key Derivation Function)
+    to derive a unique encryption key for each device. The derived key is
+    deterministic - the same BDK and device_token will always produce the
+    same device key.
+
+    Args:
+        bdk: Base Derivation Key (32 bytes) from AWS KMS
+        device_token: Device identifier string
+
+    Returns:
+        32-byte AES-256 encryption key
+
+    Raises:
+        ValueError: If bdk is not 32 bytes or device_token is empty
+        EncryptionError: If key derivation fails
+
+    Example:
+        >>> bdk = os.urandom(32)  # From KMS in production
+        >>> device_key = derive_device_key(bdk, "device-12345")
+        >>> len(device_key)
+        32
+
+    Security notes:
+        - Uses SHA-256 as the hash function
+        - No salt (salt=None) as per spec
+        - Info parameter includes version prefix for key rotation support
+        - Derived keys should be cleared from memory after use
+    """
+    if not bdk:
+        raise ValueError("BDK cannot be empty")
+
+    if len(bdk) != 32:
+        raise ValueError(f"BDK must be 32 bytes, got {len(bdk)}")
+
+    if not device_token:
+        raise ValueError("device_token cannot be empty")
+
+    try:
+        # HKDF configuration per spec
+        info = b"payment-token-v1:" + device_token.encode("utf-8")
+
+        hkdf = HKDF(
+            algorithm=hashes.SHA256(),
+            length=32,  # 256 bits for AES-256
+            salt=None,  # No salt as per spec
+            info=info,
+        )
+
+        device_key = hkdf.derive(bdk)
+
+        logger.debug(f"Derived device key for token (length: {len(device_key)} bytes)")
+        return device_key
+
+    except Exception as e:
+        logger.error(f"Key derivation failed: {str(e)}")
+        raise EncryptionError(f"Failed to derive device key: {str(e)}") from e
+
+
+def encrypt_with_key(plaintext: bytes, key: bytes) -> EncryptedData:
+    """Encrypt data using AES-256-GCM with provided key.
+
+    AES-GCM provides both confidentiality and authenticity (AEAD - Authenticated
+    Encryption with Associated Data). This prevents tampering and ensures
+    data integrity.
+
+    Args:
+        plaintext: Data to encrypt
+        key: 32-byte AES-256 encryption key
+
+    Returns:
+        EncryptedData containing ciphertext and nonce
+
+    Raises:
+        ValueError: If key is not 32 bytes
+        EncryptionError: If encryption fails
+
+    Security notes:
+        - Uses 96-bit (12-byte) nonce as recommended for GCM
+        - Nonce is randomly generated for each encryption
+        - Authentication tag is included in ciphertext (16 bytes)
+    """
+    if len(key) != 32:
+        raise ValueError(f"Encryption key must be 32 bytes, got {len(key)}")
+
+    if not plaintext:
+        raise ValueError("Plaintext cannot be empty")
+
+    try:
+        # Generate random nonce (96 bits recommended for GCM)
+        nonce = os.urandom(12)
+
+        # Create AESGCM cipher
+        aesgcm = AESGCM(key)
+
+        # Encrypt (includes authentication tag)
+        ciphertext = aesgcm.encrypt(nonce, plaintext, associated_data=None)
+
+        logger.debug(f"Encrypted {len(plaintext)} bytes -> {len(ciphertext)} bytes")
+        return EncryptedData(ciphertext=ciphertext, nonce=nonce)
+
+    except Exception as e:
+        logger.error(f"Encryption failed: {str(e)}")
+        raise EncryptionError(f"Failed to encrypt data: {str(e)}") from e
+
+
+def decrypt_with_key(encrypted_data: EncryptedData, key: bytes) -> bytes:
+    """Decrypt AES-256-GCM encrypted data.
+
+    Args:
+        encrypted_data: EncryptedData containing ciphertext and nonce
+        key: 32-byte AES-256 decryption key (same as encryption key)
+
+    Returns:
+        Decrypted plaintext bytes
+
+    Raises:
+        ValueError: If key is not 32 bytes
+        DecryptionError: If decryption or authentication fails
+
+    Security notes:
+        - Authentication tag is verified automatically
+        - Decryption fails if data was tampered with
+        - Decryption fails if wrong key is used
+    """
+    if len(key) != 32:
+        raise ValueError(f"Decryption key must be 32 bytes, got {len(key)}")
+
+    if not encrypted_data.ciphertext:
+        raise ValueError("Ciphertext cannot be empty")
+
+    if len(encrypted_data.nonce) != 12:
+        raise ValueError(f"Nonce must be 12 bytes, got {len(encrypted_data.nonce)}")
+
+    try:
+        # Create AESGCM cipher
+        aesgcm = AESGCM(key)
+
+        # Decrypt and verify authentication tag
+        plaintext = aesgcm.decrypt(encrypted_data.nonce, encrypted_data.ciphertext, associated_data=None)
+
+        logger.debug(f"Decrypted {len(encrypted_data.ciphertext)} bytes -> {len(plaintext)} bytes")
+        return plaintext
+
+    except Exception as e:
+        # Don't expose detailed error messages for security
+        logger.error(f"Decryption failed: {type(e).__name__}")
+        raise DecryptionError("Failed to decrypt data - invalid key or corrupted data") from e
+
+
+def encrypt_payment_data(
+    payment_data: bytes, bdk: bytes, device_token: str
+) -> EncryptedData:
+    """Encrypt payment data using device-derived key.
+
+    This is a convenience function that combines key derivation and encryption.
+    Use this when you have the BDK and need to encrypt data for a specific device.
+
+    Args:
+        payment_data: Raw payment data to encrypt
+        bdk: Base Derivation Key from KMS
+        device_token: Device identifier
+
+    Returns:
+        EncryptedData containing encrypted payment data
+
+    Raises:
+        ValueError: If inputs are invalid
+        EncryptionError: If encryption fails
+    """
+    device_key = derive_device_key(bdk, device_token)
+    try:
+        return encrypt_with_key(payment_data, device_key)
+    finally:
+        # Clear sensitive key from memory
+        # Note: This is a best-effort attempt; Python's memory management
+        # doesn't guarantee immediate cleanup
+        del device_key
+
+
+def decrypt_payment_data(
+    encrypted_data: EncryptedData, bdk: bytes, device_token: str
+) -> bytes:
+    """Decrypt payment data using device-derived key.
+
+    This is a convenience function that combines key derivation and decryption.
+    Use this when you have the BDK and need to decrypt data from a specific device.
+
+    Args:
+        encrypted_data: EncryptedData from device
+        bdk: Base Derivation Key from KMS
+        device_token: Device identifier
+
+    Returns:
+        Decrypted payment data bytes
+
+    Raises:
+        ValueError: If inputs are invalid
+        DecryptionError: If decryption fails
+    """
+    device_key = derive_device_key(bdk, device_token)
+    try:
+        return decrypt_with_key(encrypted_data, device_key)
+    finally:
+        # Clear sensitive key from memory
+        del device_key
+
+
+def generate_service_key() -> bytes:
+    """Generate a new service encryption key for rotating keys.
+
+    This generates a fresh 32-byte key for service-level encryption
+    (re-encryption after device-level decryption).
+
+    Returns:
+        32-byte random encryption key
+
+    Security note:
+        This key should be encrypted with KMS before storage.
+    """
+    return os.urandom(32)

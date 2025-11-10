@@ -8,6 +8,16 @@ packages = [{include = "payment_token", from = "src"}]
 
 [tool.poetry.dependencies]
 python = "^3.11"
+sqlalchemy = "^2.0.0"
+alembic = "^1.13.0"
+psycopg2-binary = "^2.9.9"
+pydantic = "^2.5.0"
+pydantic-settings = "^2.1.0"
+boto3 = "^1.34.0"
+cryptography = "^41.0.0"
+fastapi = "^0.109.0"
+uvicorn = "^0.27.0"
+protobuf = "^4.25.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.0"
@@ -15,6 +25,9 @@ pytest-asyncio = "^0.23.0"
 black = "^23.12.0"
 ruff = "^0.1.0"
 mypy = "^1.8.0"
+moto = "^5.0.0"
+pytest-mock = "^3.12.0"
+httpx = "^0.26.0"
 
 [build-system]
 requires = ["poetry-core"]
