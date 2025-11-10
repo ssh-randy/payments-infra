@@ -1,0 +1,140 @@
+syntax = "proto3";
+
+package payments.v1;
+
+import "payments/v1/common.proto";
+import "payments/v1/authorization.proto";
+
+// Event definitions for event sourcing
+// These events are stored in the payment_events table
+
+// Event: Authorization request was created
+message AuthRequestCreated {
+  // Authorization request ID
+  string auth_request_id = 1;
+
+  // Payment token to use for authorization
+  string payment_token = 2;
+
+  // Restaurant ID
+  string restaurant_id = 3;
+
+  // Amount to authorize in cents
+  int64 amount_cents = 4;
+
+  // ISO 4217 currency code
+  string currency = 5;
+
+  // Optional metadata
+  map<string, string> metadata = 6;
+
+  // Unix timestamp when created
+  int64 created_at = 7;
+}
+
+// Event: Worker started processing an authorization attempt
+message AuthAttemptStarted {
+  // Authorization request ID
+  string auth_request_id = 1;
+
+  // ID of the worker processing this request
+  string worker_id = 2;
+
+  // Version of restaurant payment config being used
+  string restaurant_payment_config_version = 3;
+
+  // Unix timestamp when processing started
+  int64 started_at = 4;
+}
+
+// Event: Authorization response received from processor
+message AuthResponseReceived {
+  // Authorization request ID
+  string auth_request_id = 1;
+
+  // Status returned by processor (AUTHORIZED or DENIED)
+  AuthStatus status = 2;
+
+  // Result details from processor
+  AuthorizationResult result = 3;
+
+  // Unix timestamp when response was received
+  int64 received_at = 4;
+}
+
+// Event: Authorization attempt failed
+message AuthAttemptFailed {
+  // Authorization request ID
+  string auth_request_id = 1;
+
+  // Machine-readable error code (e.g., "token_invalid", "processor_timeout")
+  string error_code = 2;
+
+  // Human-readable error message
+  string error_message = 3;
+
+  // Whether this error is retryable
+  bool is_retryable = 4;
+
+  // Current retry count
+  int32 retry_count = 5;
+
+  // Unix timestamp for next retry (if retryable)
+  int64 next_retry_at = 6;
+
+  // Unix timestamp when failure occurred
+  int64 failed_at = 7;
+}
+
+// Event: Void was requested for an authorization
+message AuthVoidRequested {
+  // Authorization request ID to void
+  string auth_request_id = 1;
+
+  // Reason for voiding (optional)
+  string reason = 2;
+
+  // Unix timestamp when void was requested
+  int64 requested_at = 3;
+}
+
+// Event: Authorization request expired before processing or was cancelled
+message AuthRequestExpired {
+  // Authorization request ID
+  string auth_request_id = 1;
+
+  // Unix timestamp when expiration occurred
+  int64 expired_at = 2;
+
+  // Reason for expiration (e.g., "timeout", "max_retries_exceeded", "voided_before_processing")
+  string reason = 3;
+}
+
+// Queue message types (stored in outbox table, sent to SQS)
+
+// Message sent to auth request queue
+message AuthRequestQueuedMessage {
+  // Authorization request ID to process
+  string auth_request_id = 1;
+
+  // Restaurant ID
+  string restaurant_id = 2;
+
+  // Unix timestamp when queued
+  int64 created_at = 3;
+}
+
+// Message sent to void request queue
+message VoidRequestQueuedMessage {
+  // Authorization request ID to void
+  string auth_request_id = 1;
+
+  // Restaurant ID
+  string restaurant_id = 2;
+
+  // Reason for voiding
+  string reason = 3;
+
+  // Unix timestamp when queued
+  int64 created_at = 4;
+}

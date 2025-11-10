@@ -1,0 +1,145 @@
+version: '3.8'
+
+services:
+  # PostgreSQL - Main database (payment events)
+  postgres:
+    image: postgres:15-alpine
+    container_name: payments-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: payment_events_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../../scripts/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # PostgreSQL - Isolated database for payment tokens (PCI zone simulation)
+  postgres-tokens:
+    image: postgres:15-alpine
+    container_name: payments-postgres-tokens
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: payment_tokens_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_tokens_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # LocalStack - AWS services emulation (SQS, KMS)
+  localstack:
+    image: localstack/localstack:latest
+    container_name: payments-localstack
+    ports:
+      - "4566:4566"  # LocalStack edge port
+      - "4571:4571"  # LocalStack health endpoint
+    environment:
+      SERVICES: sqs,kms,secretsmanager
+      DEBUG: 1
+      DATA_DIR: /tmp/localstack/data
+      DOCKER_HOST: unix:///var/run/docker.sock
+    volumes:
+      - localstack_data:/tmp/localstack
+      - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Payment Token Service
+  payment-token:
+    build:
+      context: ../../services/payment-token
+      dockerfile: Dockerfile
+    container_name: payment-token-service
+    ports:
+      - "8001:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:password@postgres-tokens:5432/payment_tokens_db
+      AWS_ENDPOINT_URL: http://localstack:4566
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_REGION: us-east-1
+      LOG_LEVEL: DEBUG
+    depends_on:
+      postgres-tokens:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+    volumes:
+      - ../../services/payment-token:/app
+    command: uvicorn payment_token.api.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # Authorization API Service
+  authorization-api:
+    build:
+      context: ../../services/authorization-api
+      dockerfile: Dockerfile
+    container_name: authorization-api-service
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:password@postgres:5432/payment_events_db
+      AWS_ENDPOINT_URL: http://localstack:4566
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_REGION: us-east-1
+      PAYMENT_TOKEN_SERVICE_URL: http://payment-token:8000
+      LOG_LEVEL: DEBUG
+    depends_on:
+      postgres:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+      payment-token:
+        condition: service_started
+    volumes:
+      - ../../services/authorization-api:/app
+    command: uvicorn authorization_api.api.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # Auth Processor Worker
+  auth-processor-worker:
+    build:
+      context: ../../services/auth-processor-worker
+      dockerfile: Dockerfile
+    container_name: auth-processor-worker
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:password@postgres:5432/payment_events_db
+      AWS_ENDPOINT_URL: http://localstack:4566
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_REGION: us-east-1
+      PAYMENT_TOKEN_SERVICE_URL: http://payment-token:8000
+      LOG_LEVEL: DEBUG
+    depends_on:
+      postgres:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+      payment-token:
+        condition: service_started
+    volumes:
+      - ../../services/auth-processor-worker:/app
+    command: python -m auth_processor.worker
+
+volumes:
+  postgres_data:
+  postgres_tokens_data:
+  localstack_data:
+
+networks:
+  default:
+    name: payments-network

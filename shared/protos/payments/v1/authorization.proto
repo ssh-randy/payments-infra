@@ -1,0 +1,155 @@
+syntax = "proto3";
+
+package payments.v1;
+
+import "payments/v1/common.proto";
+
+// Authorization API messages
+// Main entry point for restaurant POS systems to authorize payments
+
+// Status of an authorization request
+enum AuthStatus {
+  // Unspecified/unknown status (proto3 default)
+  AUTH_STATUS_UNSPECIFIED = 0;
+
+  // Authorization request created but not yet queued
+  AUTH_STATUS_PENDING = 1;
+
+  // Authorization request is being processed by a worker
+  AUTH_STATUS_PROCESSING = 2;
+
+  // Authorization was successful
+  AUTH_STATUS_AUTHORIZED = 3;
+
+  // Authorization was denied by the processor
+  AUTH_STATUS_DENIED = 4;
+
+  // Authorization failed due to a system error
+  AUTH_STATUS_FAILED = 5;
+
+  // Authorization was voided by the user
+  AUTH_STATUS_VOIDED = 6;
+
+  // Authorization request expired before processing
+  AUTH_STATUS_EXPIRED = 7;
+}
+
+// Request to authorize a payment
+message AuthorizeRequest {
+  // Payment token from Payment Token Service
+  string payment_token = 1;
+
+  // UUID of the restaurant
+  string restaurant_id = 2;
+
+  // Amount to authorize in cents (e.g., 1050 = $10.50)
+  int64 amount_cents = 3;
+
+  // ISO 4217 currency code (e.g., "USD")
+  string currency = 4;
+
+  // Client-provided idempotency key
+  string idempotency_key = 5;
+
+  // Optional metadata (e.g., order_id, table_number, tip_amount)
+  map<string, string> metadata = 6;
+}
+
+// Response from authorization request
+message AuthorizeResponse {
+  // UUID of the authorization request
+  string auth_request_id = 1;
+
+  // Current status of the authorization
+  AuthStatus status = 2;
+
+  // Result details (populated if status is AUTHORIZED or DENIED)
+  AuthorizationResult result = 3;
+
+  // URL to poll for status (populated if status is PROCESSING)
+  string status_url = 4;
+}
+
+// Result of an authorization attempt
+message AuthorizationResult {
+  // Processor's authorization ID (e.g., Stripe charge ID)
+  string processor_auth_id = 1;
+
+  // Name of the processor used (e.g., "stripe", "chase")
+  string processor_name = 2;
+
+  // Amount that was actually authorized in cents
+  int64 authorized_amount_cents = 3;
+
+  // Currency that was authorized
+  string currency = 4;
+
+  // Processor-provided authorization code
+  string authorization_code = 5;
+
+  // Unix timestamp when authorization was granted
+  int64 authorized_at = 6;
+
+  // For DENIED status: processor decline code
+  string denial_code = 7;
+
+  // For DENIED status: human-readable decline reason
+  string denial_reason = 8;
+
+  // Raw processor response metadata
+  map<string, string> processor_metadata = 9;
+}
+
+// Request to get status of an authorization
+message GetAuthStatusRequest {
+  // Authorization request ID
+  string auth_request_id = 1;
+
+  // Restaurant ID (must match the owner)
+  string restaurant_id = 2;
+}
+
+// Response with authorization status
+message GetAuthStatusResponse {
+  // Authorization request ID
+  string auth_request_id = 1;
+
+  // Current status
+  AuthStatus status = 2;
+
+  // Result details (if completed)
+  AuthorizationResult result = 3;
+
+  // Unix timestamp when request was created
+  int64 created_at = 4;
+
+  // Unix timestamp when request was last updated
+  int64 updated_at = 5;
+}
+
+// Request to void an authorization
+message VoidAuthRequest {
+  // Authorization request ID to void
+  string auth_request_id = 1;
+
+  // Restaurant ID (must match the owner)
+  string restaurant_id = 2;
+
+  // Optional reason for voiding (e.g., "customer_cancelled", "duplicate_order")
+  string reason = 3;
+
+  // Client-provided idempotency key
+  string idempotency_key = 4;
+}
+
+// Response from void request
+message VoidAuthResponse {
+  // Authorization request ID that was voided
+  string auth_request_id = 1;
+
+  // Status of the void operation
+  VoidStatus status = 2;
+
+  // Unix timestamp when void was processed
+  int64 voided_at = 3;
+}

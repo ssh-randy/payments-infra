@@ -1,0 +1,17 @@
+[tool.poetry]
+name = "payments-proto"
+version = "0.1.0"
+description = "Generated protobuf code for payments infrastructure"
+authors = []
+readme = "README.md"
+packages = [{include = "payments_proto"}]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+protobuf = "^4.25.0"
+grpcio = "^1.60.0"
+grpcio-tools = "^1.60.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

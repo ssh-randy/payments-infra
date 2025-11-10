@@ -1,0 +1,92 @@
+syntax = "proto3";
+
+package payments.v1;
+
+// Common message types shared across all payment services
+
+// Represents a monetary amount in the smallest currency unit (cents)
+message Money {
+  // Amount in cents (e.g., 1050 = $10.50)
+  int64 amount_cents = 1;
+
+  // ISO 4217 currency code (e.g., "USD", "EUR")
+  string currency = 2;
+}
+
+// Timestamp with nanosecond precision
+message Timestamp {
+  // Seconds since Unix epoch
+  int64 seconds = 1;
+
+  // Nanoseconds component (0-999999999)
+  int32 nanos = 2;
+}
+
+// Physical address
+message Address {
+  // Street address line 1
+  string line1 = 1;
+
+  // Street address line 2 (optional)
+  string line2 = 2;
+
+  // City
+  string city = 3;
+
+  // State or province
+  string state = 4;
+
+  // Postal/ZIP code
+  string postal_code = 5;
+
+  // ISO 3166-1 alpha-2 country code (e.g., "US", "CA")
+  string country = 6;
+}
+
+// Metadata attached to events for tracing and causality tracking
+message EventMetadata {
+  // Unique identifier for this event
+  string event_id = 1;
+
+  // Correlation ID for tracking requests across services
+  string correlation_id = 2;
+
+  // ID of the event or request that caused this event
+  string causation_id = 3;
+
+  // When this event was created
+  Timestamp created_at = 4;
+}
+
+// Error details for failed operations
+message ErrorDetails {
+  // Machine-readable error code (e.g., "token_invalid", "processor_timeout")
+  string error_code = 1;
+
+  // Human-readable error message
+  string error_message = 2;
+
+  // Whether this error is transient and can be retried
+  bool is_retryable = 3;
+
+  // Number of times this operation has been retried
+  int32 retry_count = 4;
+}
+
+// Status of a void request
+enum VoidStatus {
+  // Unspecified/unknown status (proto3 default)
+  VOID_STATUS_UNSPECIFIED = 0;
+
+  // Void request has been queued but not yet processed
+  VOID_STATUS_PENDING = 1;
+
+  // Void was successfully completed
+  VOID_STATUS_COMPLETED = 2;
+
+  // Void failed (e.g., already captured)
+  VOID_STATUS_FAILED = 3;
+
+  // Void not required (never authorized, just cancelled from queue)
+  VOID_STATUS_NOT_REQUIRED = 4;
+}
