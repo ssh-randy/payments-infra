@@ -19,6 +19,12 @@ COPY poetry.lock* ./
 RUN poetry config virtualenvs.create false \
     && poetry install --no-interaction --no-ansi --no-root
 
+# Copy protobuf files from shared directory
+COPY ../../shared/python/payments_proto/ ./payments_proto/
+
+# Create symlink for protobuf imports to work
+RUN ln -s /app/payments_proto/payments /app/payments
+
 # Copy application code
 COPY src/authorization_api ./authorization_api
 
