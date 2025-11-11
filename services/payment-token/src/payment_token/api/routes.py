@@ -26,10 +26,7 @@ from payment_token.domain.token import TokenError, TokenExpiredError, TokenOwner
 from payment_token.infrastructure.kms import KMSError
 
 # Import generated protobuf messages
-import sys
-sys.path.insert(0, '/Users/randy/sudocodeai/demos/payments-infra/shared/python/payments_proto')
-
-from payments.v1 import payment_token_pb2
+from payments_proto.payments.v1 import payment_token_pb2
 
 logger = logging.getLogger(__name__)
 

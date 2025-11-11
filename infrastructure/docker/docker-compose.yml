@@ -13,7 +13,6 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ../../scripts/init.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
@@ -92,7 +91,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: postgresql+asyncpg://postgres:password@postgres:5432/payment_events_db
+      DATABASE_URL: postgresql://postgres:password@postgres:5432/payment_events_db
       AWS_ENDPOINT_URL: http://localstack:4566
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
@@ -107,7 +106,7 @@ services:
       payment-token:
         condition: service_started
     volumes:
-      - ../../services/authorization-api:/app
+      - ../../services/authorization-api/src:/app
     command: uvicorn authorization_api.api.main:app --host 0.0.0.0 --port 8000 --reload
 
   # Auth Processor Worker

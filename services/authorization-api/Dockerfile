@@ -20,7 +20,7 @@ RUN poetry config virtualenvs.create false \
     && poetry install --no-interaction --no-ansi --no-root
 
 # Copy application code
-COPY src/ ./
+COPY src/authorization_api ./authorization_api
 
 # Expose port
 EXPOSE 8000

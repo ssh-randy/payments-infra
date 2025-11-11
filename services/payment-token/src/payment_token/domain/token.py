@@ -79,27 +79,44 @@ class PaymentData:
     def to_bytes(self) -> bytes:
         """Serialize payment data to bytes for encryption.
 
-        Returns a deterministic byte representation suitable for encryption.
-        Format: card_number|exp_month|exp_year|cvv|cardholder_name
+        Returns a deterministic protobuf-encoded byte representation.
 
         Returns:
-            Bytes representation of payment data
+            Protobuf-encoded bytes representation of payment data
         """
-        parts = [
-            self.card_number,
-            self.exp_month,
-            self.exp_year,
-            self.cvv,
-            self.cardholder_name,
-        ]
-        return "|".join(parts).encode("utf-8")
+        from payments_proto.payments.v1 import payment_token_pb2
+
+        pb_payment_data = payment_token_pb2.PaymentData(
+            card_number=self.card_number,
+            exp_month=self.exp_month,
+            exp_year=self.exp_year,
+            cvv=self.cvv,
+            cardholder_name=self.cardholder_name,
+        )
+
+        # Add billing address if present
+        if self.billing_address:
+            pb_payment_data.billing_address.CopyFrom(
+                payment_token_pb2.Address(
+                    line1=self.billing_address.get("line1", ""),
+                    line2=self.billing_address.get("line2", ""),
+                    city=self.billing_address.get("city", ""),
+                    state=self.billing_address.get("state", ""),
+                    postal_code=self.billing_address.get("postal_code", ""),
+                    country=self.billing_address.get("country", "US"),
+                )
+            )
+
+        return pb_payment_data.SerializeToString()
 
     @classmethod
     def from_bytes(cls, data: bytes) -> "PaymentData":
         """Deserialize payment data from bytes.
 
+        Parses protobuf-encoded PaymentData message.
+
         Args:
-            data: Byte representation from to_bytes()
+            data: Protobuf-encoded PaymentData bytes
 
         Returns:
             PaymentData instance
@@ -108,20 +125,33 @@ class PaymentData:
             ValueError: If data format is invalid
         """
         try:
-            text = data.decode("utf-8")
-            parts = text.split("|")
+            from payments_proto.payments.v1 import payment_token_pb2
 
-            if len(parts) != 5:
-                raise ValueError(f"Expected 5 parts, got {len(parts)}")
+            pb_payment_data = payment_token_pb2.PaymentData()
+            pb_payment_data.ParseFromString(data)
+
+            # Extract billing address if present
+            billing_address = None
+            if pb_payment_data.HasField("billing_address"):
+                addr = pb_payment_data.billing_address
+                billing_address = {
+                    "line1": addr.line1,
+                    "line2": addr.line2,
+                    "city": addr.city,
+                    "state": addr.state,
+                    "postal_code": addr.postal_code,
+                    "country": addr.country,
+                }
 
             return cls(
-                card_number=parts[0],
-                exp_month=parts[1],
-                exp_year=parts[2],
-                cvv=parts[3],
-                cardholder_name=parts[4],
+                card_number=pb_payment_data.card_number,
+                exp_month=pb_payment_data.exp_month,
+                exp_year=pb_payment_data.exp_year,
+                cvv=pb_payment_data.cvv,
+                cardholder_name=pb_payment_data.cardholder_name,
+                billing_address=billing_address,
             )
-        except (UnicodeDecodeError, IndexError) as e:
+        except Exception as e:
             raise ValueError(f"Invalid payment data format: {e}") from e
 
 

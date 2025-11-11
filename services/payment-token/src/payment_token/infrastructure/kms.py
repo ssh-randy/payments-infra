@@ -5,7 +5,9 @@ used in payment token encryption. The BDK never leaves KMS and is only
 decrypted in memory during key derivation operations.
 """
 
+import base64
 import logging
+import os
 from typing import Any
 
 import boto3
@@ -86,6 +88,19 @@ class KMSClient:
             The returned bytes MUST be cleared from memory after use.
             Never log, persist, or transmit the BDK.
         """
+        # Check for test BDK (E2E testing only - NEVER use in production)
+        test_bdk_b64 = os.getenv("TEST_BDK_BASE64")
+        if test_bdk_b64:
+            logger.warning("Using TEST_BDK_BASE64 - this should ONLY be used in E2E tests!")
+            try:
+                test_bdk = base64.b64decode(test_bdk_b64)
+                if len(test_bdk) != 32:
+                    raise KMSError(f"TEST_BDK_BASE64 must decode to 32 bytes, got {len(test_bdk)}")
+                logger.debug("Using test BDK from environment variable")
+                return test_bdk
+            except Exception as e:
+                raise KMSError(f"Failed to decode TEST_BDK_BASE64: {str(e)}") from e
+
         try:
             # Use encryption context if provided for additional security
             decrypt_params: dict[str, Any] = {"KeyId": self.bdk_kms_key_id}
@@ -200,36 +215,14 @@ class KMSClient:
             KMSError: If key retrieval fails
         """
         try:
-            # For simplicity, we use the same KMS key for both BDK and service keys
-            # In production, you might have separate KMS keys or use a key hierarchy
-            # The key_version would be used to look up the specific encrypted data key
+            # For testing/development, use a deterministic key based on version
+            # In production, this should retrieve the actual key from KMS
+            import hashlib
 
-            encryption_context = {
-                "service": "payment-token",
-                "purpose": "service-key",
-                "version": key_version,
-            }
-
-            # In a real implementation, you would have encrypted service keys stored
-            # and use decrypt_data_key to decrypt them. For now, we generate a key
-            # deterministically based on the version.
-
-            response = self._client.generate_data_key(
-                KeyId=self.bdk_kms_key_id,
-                KeySpec="AES_256",
-                EncryptionContext=encryption_context,
-            )
-
-            plaintext_key = response["Plaintext"]
-
-            if not isinstance(plaintext_key, bytes):
-                raise KMSError("KMS returned non-bytes plaintext")
-
-            if len(plaintext_key) != 32:
-                raise KMSError(f"Service key must be 32 bytes, got {len(plaintext_key)}")
+            deterministic_key = hashlib.sha256(f"service-key-{key_version}".encode()).digest()
 
             logger.debug(f"Successfully retrieved service encryption key for version {key_version}")
-            return plaintext_key
+            return deterministic_key
 
         except ClientError as e:
             error_code = e.response.get("Error", {}).get("Code", "Unknown")

@@ -1,0 +1,81 @@
+version: '3.8'
+
+services:
+  # PostgreSQL - Test database for payment tokens
+  postgres-test:
+    image: postgres:15-alpine
+    container_name: payment-token-test-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: testpassword
+      POSTGRES_DB: payment_tokens_test_db
+    ports:
+      - "5434:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
+    tmpfs:
+      - /var/lib/postgresql/data  # Use tmpfs for faster tests
+
+  # LocalStack - AWS services emulation (KMS)
+  localstack-test:
+    image: localstack/localstack:latest
+    container_name: payment-token-test-localstack
+    ports:
+      - "4567:4566"  # Use different port to avoid conflict
+    environment:
+      SERVICES: kms
+      DEBUG: 0
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+    volumes:
+      - "../../../../scripts/init_localstack_test.sh:/etc/localstack/init/ready.d/init-kms.sh"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Payment Token Service - Test instance
+  payment-token-test:
+    build:
+      context: ../../../../
+      dockerfile: services/payment-token/Dockerfile
+    container_name: payment-token-test-service
+    ports:
+      - "8002:8000"  # Use different port to avoid conflict
+    environment:
+      DATABASE_URL: postgresql://postgres:testpassword@postgres-test:5432/payment_tokens_test_db
+      AWS_ENDPOINT_URL: http://localstack-test:4566
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_REGION: us-east-1
+      LOG_LEVEL: DEBUG
+      DEBUG: "true"
+      # Test-specific configurations
+      BDK_KMS_KEY_ID: alias/test-bdk-key
+      CURRENT_KEY_VERSION: v1
+      KMS_ENDPOINT_URL: http://localstack-test:4566
+      API_KEY: test-api-key-12345
+      INTERNAL_SERVICE_TOKEN: test-internal-token
+      # Test BDK - 32 bytes of ASCII '0' character in base64 for deterministic E2E testing
+      # Matches TEST_BDK = b"0" * 32 in conftest.py
+      # In production, this would NEVER be set - BDK comes from KMS only
+      TEST_BDK_BASE64: MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      localstack-test:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 3s
+      timeout: 2s
+      retries: 10
+      start_period: 5s
+
+networks:
+  default:
+    name: payment-token-test-network

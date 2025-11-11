@@ -1,0 +1,49 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.11.11, pytest-7.4.4, pluggy-1.6.0 -- /Users/randy/sudocodeai/demos/payments-infra/services/payment-token/.venv/bin/python
+cachedir: .pytest_cache
+rootdir: /Users/randy/sudocodeai/demos/payments-infra/services/payment-token
+plugins: asyncio-0.23.8, mock-3.15.1, anyio-4.11.0
+asyncio: mode=Mode.STRICT
+collecting ... collected 39 items
+
+tests/e2e/test_api_contracts.py::TestCreatePaymentTokenEndpoint::test_returns_201_on_first_request PASSED [  2%]
+tests/e2e/test_api_contracts.py::TestCreatePaymentTokenEndpoint::test_returns_200_on_idempotent_request PASSED [  5%]
+tests/e2e/test_api_contracts.py::TestCreatePaymentTokenEndpoint::test_returns_400_on_missing_required_fields PASSED [  7%]
+tests/e2e/test_api_contracts.py::TestCreatePaymentTokenEndpoint::test_returns_400_on_decryption_failure PASSED [ 10%]
+tests/e2e/test_api_contracts.py::TestCreatePaymentTokenEndpoint::test_returns_401_on_missing_api_key PASSED [ 12%]
+tests/e2e/test_api_contracts.py::TestCreatePaymentTokenEndpoint::test_returns_401_on_invalid_api_key PASSED [ 15%]
+tests/e2e/test_api_contracts.py::TestCreatePaymentTokenEndpoint::test_response_includes_required_fields PASSED [ 17%]
+tests/e2e/test_api_contracts.py::TestGetPaymentTokenEndpoint::test_returns_200_with_token_metadata PASSED [ 20%]
+tests/e2e/test_api_contracts.py::TestGetPaymentTokenEndpoint::test_returns_404_for_nonexistent_token PASSED [ 23%]
+tests/e2e/test_api_contracts.py::TestGetPaymentTokenEndpoint::test_returns_404_for_wrong_restaurant PASSED [ 25%]
+tests/e2e/test_api_contracts.py::TestGetPaymentTokenEndpoint::test_returns_401_on_missing_api_key PASSED [ 28%]
+tests/e2e/test_api_contracts.py::TestDecryptPaymentTokenEndpoint::test_returns_200_with_payment_data_for_valid_request PASSED [ 30%]
+tests/e2e/test_api_contracts.py::TestDecryptPaymentTokenEndpoint::test_returns_400_for_invalid_token_format PASSED [ 33%]
+tests/e2e/test_api_contracts.py::TestDecryptPaymentTokenEndpoint::test_returns_401_for_missing_service_auth_header PASSED [ 35%]
+tests/e2e/test_api_contracts.py::TestDecryptPaymentTokenEndpoint::test_returns_403_for_unauthorized_service PASSED [ 38%]
+tests/e2e/test_api_contracts.py::TestDecryptPaymentTokenEndpoint::test_returns_403_for_restaurant_id_mismatch PASSED [ 41%]
+tests/e2e/test_api_contracts.py::TestDecryptPaymentTokenEndpoint::test_returns_404_for_nonexistent_token PASSED [ 43%]
+tests/e2e/test_api_contracts.py::TestDecryptPaymentTokenEndpoint::test_requires_request_id_header PASSED [ 46%]
+tests/e2e/test_decrypt_behaviors.py::TestInternalDecryptionAuthorization::test_auth_processor_worker_can_decrypt PASSED [ 48%]
+tests/e2e/test_decrypt_behaviors.py::TestInternalDecryptionAuthorization::test_void_processor_worker_can_decrypt PASSED [ 51%]
+tests/e2e/test_decrypt_behaviors.py::TestInternalDecryptionAuthorization::test_unauthorized_service_cannot_decrypt PASSED [ 53%]
+tests/e2e/test_decrypt_behaviors.py::TestInternalDecryptionAuthorization::test_missing_service_auth_header_returns_401 PASSED [ 56%]
+tests/e2e/test_decrypt_behaviors.py::TestInternalDecryptionAuthorization::test_missing_request_id_header_returns_400 PASSED [ 58%]
+tests/e2e/test_decrypt_behaviors.py::TestAuditLoggingForDecryption::test_successful_decrypt_creates_audit_log PASSED [ 61%]
+tests/e2e/test_decrypt_behaviors.py::TestAuditLoggingForDecryption::test_failed_decrypt_creates_audit_log_with_error PASSED [ 64%]
+tests/e2e/test_decrypt_behaviors.py::TestAuditLoggingForDecryption::test_audit_log_includes_correlation_id PASSED [ 66%]
+tests/e2e/test_token_creation_behaviors.py::TestIdempotencyBehavior::test_same_idempotency_key_returns_same_token PASSED [ 69%]
+tests/e2e/test_token_creation_behaviors.py::TestIdempotencyBehavior::test_different_idempotency_keys_create_different_tokens PASSED [ 71%]
+tests/e2e/test_token_creation_behaviors.py::TestIdempotencyBehavior::test_no_duplicate_database_entries_with_idempotency PASSED [ 74%]
+tests/e2e/test_token_creation_behaviors.py::TestDeviceBasedDecryption::test_valid_device_token_successfully_decrypts PASSED [ 76%]
+tests/e2e/test_token_creation_behaviors.py::TestDeviceBasedDecryption::test_invalid_device_token_fails_decryption PASSED [ 79%]
+tests/e2e/test_token_creation_behaviors.py::TestDeviceBasedDecryption::test_corrupted_encrypted_data_fails_decryption PASSED [ 82%]
+tests/e2e/test_token_retrieval_behaviors.py::TestTokenExpiration::test_non_expired_tokens_work_normally PASSED [ 84%]
+tests/e2e/test_token_retrieval_behaviors.py::TestTokenExpiration::test_expired_token_returns_410_on_get PASSED [ 87%]
+tests/e2e/test_token_retrieval_behaviors.py::TestTokenExpiration::test_expired_token_returns_410_on_decrypt PASSED [ 89%]
+tests/e2e/test_token_retrieval_behaviors.py::TestRestaurantScoping::test_token_accessible_by_owning_restaurant PASSED [ 92%]
+tests/e2e/test_token_retrieval_behaviors.py::TestRestaurantScoping::test_wrong_restaurant_id_returns_404_on_get PASSED [ 94%]
+tests/e2e/test_token_retrieval_behaviors.py::TestRestaurantScoping::test_wrong_restaurant_id_returns_403_on_decrypt PASSED [ 97%]
+tests/e2e/test_token_retrieval_behaviors.py::TestRestaurantScoping::test_different_restaurants_cannot_access_each_others_tokens PASSED [100%]
+
+============================= 39 passed in 12.53s ==============================

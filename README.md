@@ -217,6 +217,23 @@ make ci
 - Only accessible by Payment Token Service
 - Encrypted at rest with AWS KMS
 
+### Database Migrations
+
+Database schemas are managed with Alembic migrations:
+
+```bash
+# Run migrations for payment_events_db
+./scripts/migrate_payment_events_db.sh
+
+# Run migrations for payment_tokens_db (token service)
+./scripts/migrate_payment_token_db.sh
+
+# Reset payment_events_db (local dev only - destructive!)
+./scripts/reset_payment_events_db.sh
+```
+
+See `infrastructure/migrations/README.md` for detailed migration documentation.
+
 ## Deployment
 
 ### Local Development

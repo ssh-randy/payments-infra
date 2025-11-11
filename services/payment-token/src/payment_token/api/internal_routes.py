@@ -23,6 +23,9 @@ from payment_token.infrastructure.database import get_db
 from payment_token.infrastructure.kms import KMSClient
 from payment_token.infrastructure.models import PaymentToken as PaymentTokenModel
 
+# Import generated protobuf messages
+from payments_proto.payments.v1 import payment_token_pb2
+
 logger = logging.getLogger(__name__)
 
 # Create router for internal API endpoints
@@ -73,18 +76,7 @@ async def decrypt_payment_token(
     """
     requesting_service, request_id = auth_info
 
-    # Import protobuf messages
-    try:
-        # Adjust import path based on where protobuf files are generated
-        import sys
-        sys.path.insert(0, "/Users/randy/sudocodeai/demos/payments-infra/shared/python")
-        from payments_proto.payments.v1 import payment_token_pb2
-    except ImportError as e:
-        logger.error(f"Failed to import protobuf messages: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Internal server error",
-        )
+    # Note: protobuf messages imported at module level
 
     # Read raw request body
     request_data = await request.body()

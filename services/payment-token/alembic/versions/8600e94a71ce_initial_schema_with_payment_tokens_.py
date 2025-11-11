@@ -1,7 +1,7 @@
 """Initial schema with payment_tokens, encryption_keys, idempotency_keys, and audit_log tables
 
 Revision ID: 8600e94a71ce
-Revises: 
+Revises:
 Create Date: 2025-11-10 10:52:45.450411
 
 """
@@ -9,6 +9,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import UUID
 
 
 # revision identifiers, used by Alembic.
@@ -24,7 +25,7 @@ def upgrade() -> None:
     op.create_table(
         'payment_tokens',
         sa.Column('payment_token', sa.String(length=64), nullable=False, comment='Token ID in format pt_<uuid>'),
-        sa.Column('restaurant_id', sa.String(length=36), nullable=False, comment='Restaurant UUID'),
+        sa.Column('restaurant_id', UUID(as_uuid=False), nullable=False, comment='Restaurant UUID'),
         sa.Column('encrypted_payment_data', sa.LargeBinary(), nullable=False, comment='Payment data encrypted with service key'),
         sa.Column('encryption_key_version', sa.String(length=50), nullable=False, comment='Version of encryption key used'),
         sa.Column('device_token', sa.String(length=255), nullable=False, comment='Device identifier used for original encryption'),
@@ -41,7 +42,7 @@ def upgrade() -> None:
     op.create_table(
         'token_idempotency_keys',
         sa.Column('idempotency_key', sa.String(length=255), nullable=False, comment='Client-provided idempotency key'),
-        sa.Column('restaurant_id', sa.String(length=36), nullable=False, comment='Restaurant UUID'),
+        sa.Column('restaurant_id', UUID(as_uuid=False), nullable=False, comment='Restaurant UUID'),
         sa.Column('payment_token', sa.String(length=64), nullable=False, comment='Payment token created for this idempotency key'),
         sa.Column('created_at', sa.TIMESTAMP(timezone=True), server_default=sa.text('now()'), nullable=False, comment='Idempotency key creation timestamp'),
         sa.Column('expires_at', sa.TIMESTAMP(timezone=True), nullable=False, comment='Idempotency key expiration (24 hours)'),
@@ -65,7 +66,7 @@ def upgrade() -> None:
         'decrypt_audit_log',
         sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False, comment='Audit log entry ID'),
         sa.Column('payment_token', sa.String(length=64), nullable=False, comment='Token that was decrypted'),
-        sa.Column('restaurant_id', sa.String(length=36), nullable=False, comment='Restaurant UUID'),
+        sa.Column('restaurant_id', UUID(as_uuid=False), nullable=False, comment='Restaurant UUID'),
         sa.Column('requesting_service', sa.String(length=100), nullable=False, comment='Service that requested decryption (e.g., auth-processor-worker)'),
         sa.Column('request_id', sa.String(length=255), nullable=False, comment='Correlation/request ID for tracing'),
         sa.Column('success', sa.Boolean(), nullable=False, comment='Whether decryption succeeded'),
