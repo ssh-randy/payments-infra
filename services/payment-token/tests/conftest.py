@@ -4,6 +4,7 @@ This module provides shared test fixtures including:
 - Test database setup with Alembic migrations
 - Database session management
 - Sample test data
+- Service availability checks for integration tests
 """
 
 import os
@@ -27,8 +28,139 @@ from payment_token.infrastructure.database import Base
 # Test database URL - use a separate test database
 TEST_DATABASE_URL = os.getenv(
     "TEST_DATABASE_URL",
-    "postgresql://postgres:postgres@localhost:5432/payment_tokens_test",
+    "postgresql://postgres:password@localhost:5433/payment_tokens_test",
 )
+
+
+def check_service_availability():
+    """Check if required services for integration tests are available.
+
+    This function checks:
+    - PostgreSQL is running and accessible on port 5433 (postgres-tokens)
+    - LocalStack is running (for KMS integration tests)
+
+    If services are not available, it provides helpful error messages.
+    """
+    import socket
+
+    errors = []
+
+    # Check PostgreSQL on port 5433 (postgres-tokens container)
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(1)
+        result = sock.connect_ex(('localhost', 5433))
+        sock.close()
+
+        if result != 0:
+            errors.append(
+                "PostgreSQL is not running on localhost:5433\n"
+                "  Start services with:\n"
+                "    cd ../../infrastructure/docker\n"
+                "    docker-compose up -d postgres-tokens localstack"
+            )
+    except Exception as e:
+        errors.append(f"Failed to check PostgreSQL: {e}")
+
+    # Check LocalStack (for KMS)
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(1)
+        result = sock.connect_ex(('localhost', 4566))
+        sock.close()
+
+        if result != 0:
+            errors.append(
+                "LocalStack is not running on localhost:4566\n"
+                "  This is required for integration tests that use KMS.\n"
+                "  Start services with:\n"
+                "    cd ../../infrastructure/docker\n"
+                "    docker-compose up -d postgres-tokens localstack"
+            )
+    except Exception as e:
+        errors.append(f"Failed to check LocalStack: {e}")
+
+    if errors:
+        error_message = "\n\n" + "="*80 + "\n"
+        error_message += "ERROR: Required services are not available for integration tests\n"
+        error_message += "="*80 + "\n\n"
+        error_message += "\n\n".join(errors)
+        error_message += "\n\n" + "="*80 + "\n"
+        error_message += "See tests/README.md for more details on running integration tests.\n"
+        error_message += "="*80 + "\n"
+        pytest.exit(error_message, returncode=1)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def check_services_for_integration_tests(request):
+    """Check service availability before running tests.
+
+    This fixture runs automatically for all test sessions.
+
+    Note:
+    - Integration tests are self-contained (use SQLite + mocked KMS)
+      and don't require external services.
+    - E2E tests manage their own Docker infrastructure via docker_services fixture,
+      so we skip the check for them.
+    """
+    # Don't run service checks - let each test type handle its own infrastructure:
+    # - Unit tests: no external services needed
+    # - Integration tests: use SQLite + mocked KMS (no external services)
+    # - E2E tests: manage their own docker-compose infrastructure
+    pass
+
+
+def ensure_test_database_exists():
+    """Ensure the test database exists before running migrations.
+
+    This function:
+    1. Connects to the default postgres database
+    2. Creates the test database if it doesn't exist
+    """
+    import psycopg2
+    from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
+
+    # Parse database URL to get connection details
+    # postgresql://user:password@host:port/dbname
+    parts = TEST_DATABASE_URL.replace("postgresql://", "").split("@")
+    user_pass = parts[0].split(":")
+    host_port_db = parts[1].split("/")
+    host_port = host_port_db[0].split(":")
+
+    user = user_pass[0]
+    password = user_pass[1] if len(user_pass) > 1 else ""
+    host = host_port[0]
+    port = int(host_port[1]) if len(host_port) > 1 else 5432
+    dbname = host_port_db[1]
+
+    # Connect to postgres database to check/create test database
+    try:
+        conn = psycopg2.connect(
+            dbname="postgres",
+            user=user,
+            password=password,
+            host=host,
+            port=port,
+        )
+        conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
+        cursor = conn.cursor()
+
+        # Check if database exists
+        cursor.execute(
+            "SELECT 1 FROM pg_database WHERE datname = %s",
+            (dbname,)
+        )
+        exists = cursor.fetchone()
+
+        if not exists:
+            print(f"Creating test database: {dbname}")
+            cursor.execute(f'CREATE DATABASE "{dbname}"')
+
+        cursor.close()
+        conn.close()
+    except Exception as e:
+        print(f"Warning: Could not create test database: {e}")
+        # Continue anyway - migrations might handle it
 
 
 @pytest.fixture(scope="session")
@@ -36,11 +168,15 @@ def db_engine():
     """Create a test database engine and apply migrations.
 
     This fixture:
-    1. Creates a test database engine
-    2. Runs Alembic migrations to set up schema
-    3. Yields the engine for tests
-    4. Cleans up after all tests complete
+    1. Ensures test database exists
+    2. Creates a test database engine
+    3. Runs Alembic migrations to set up schema
+    4. Yields the engine for tests
+    5. Cleans up after all tests complete
     """
+    # Ensure test database exists
+    ensure_test_database_exists()
+
     # Create engine
     engine = create_engine(TEST_DATABASE_URL, echo=False)
 
