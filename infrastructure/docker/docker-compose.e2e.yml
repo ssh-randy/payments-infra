@@ -1,0 +1,195 @@
+version: '3.8'
+
+services:
+  # PostgreSQL - Main database (payment events) for E2E tests
+  postgres:
+    image: postgres:15-alpine
+    container_name: payments-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: payment_events_e2e
+    ports:
+      - "5434:5432"  # Different port to avoid conflicts with dev
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - e2e-network
+
+  # PostgreSQL - Isolated database for payment tokens (PCI zone simulation)
+  postgres-tokens:
+    image: postgres:15-alpine
+    container_name: payments-postgres-tokens
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: payment_tokens_e2e
+    ports:
+      - "5435:5432"  # Different port
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - e2e-network
+
+  # LocalStack - AWS services emulation (SQS, KMS)
+  localstack:
+    image: localstack/localstack:latest
+    container_name: payments-localstack
+    ports:
+      - "4567:4566"  # Different port to avoid conflicts
+    environment:
+      SERVICES: sqs,kms,secretsmanager
+      DEBUG: 1
+      DATA_DIR: /tmp/localstack/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - e2e-network
+
+  # Init container - sets up LocalStack resources automatically
+  localstack-init:
+    image: amazon/aws-cli:latest
+    container_name: payments-localstack-init
+    depends_on:
+      localstack:
+        condition: service_healthy
+    environment:
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_DEFAULT_REGION: us-east-1
+    volumes:
+      - ../../scripts/init_localstack_container.sh:/init.sh:ro
+    entrypoint: ["/bin/bash", "/init.sh"]
+    networks:
+      - e2e-network
+
+  # Payment Token Service
+  payment-token:
+    build:
+      context: ../../
+      dockerfile: services/payment-token/Dockerfile
+    container_name: payment-token-service
+    ports:
+      - "8001:8000"
+    environment:
+      DATABASE_URL: postgresql://postgres:password@postgres-tokens:5432/payment_tokens_e2e
+      BDK_KMS_KEY_ID: alias/payment-token-bdk-e2e
+      KMS_ENDPOINT_URL: http://localstack:4566
+      AWS_ENDPOINT_URL: http://localstack:4566
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_REGION: us-east-1
+      ENVIRONMENT: e2e
+      LOG_LEVEL: INFO
+      # Test BDK - 32 bytes of ASCII '0' character in base64 for deterministic E2E testing
+      # Matches TEST_BDK = b"0" * 32 in tests/e2e/helpers/http_client.py
+      # In production, this would NEVER be set - BDK comes from KMS only
+      TEST_BDK_BASE64: MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=
+    depends_on:
+      postgres-tokens:
+        condition: service_healthy
+      localstack-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - e2e-network
+
+  # Authorization API Service
+  authorization-api:
+    build:
+      context: ../../
+      dockerfile: services/authorization-api/Dockerfile
+    container_name: authorization-api-service
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://postgres:password@postgres:5432/payment_events_e2e
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: payment_events_e2e
+      AWS_ENDPOINT_URL: http://localstack:4566
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_REGION: us-east-1
+      PAYMENT_TOKEN_SERVICE_URL: http://payment-token:8000
+      AUTH_REQUESTS_QUEUE_URL: http://localstack:4566/000000000000/auth-requests-e2e.fifo
+      ENVIRONMENT: e2e
+      LOG_LEVEL: INFO
+      OUTBOX_PROCESSOR_ENABLED: "true"
+      OUTBOX_PROCESSOR_BATCH_SIZE: 10
+      OUTBOX_PROCESSOR_INTERVAL_SECONDS: 1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      localstack-init:
+        condition: service_completed_successfully
+      payment-token:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - e2e-network
+
+  # Auth Processor Worker
+  auth-processor-worker:
+    build:
+      context: ../../
+      dockerfile: services/auth-processor-worker/Dockerfile
+    container_name: auth-processor-worker
+    environment:
+      DATABASE_URL: postgresql://postgres:password@postgres:5432/payment_events_e2e
+      AWS_ENDPOINT_URL: http://localstack:4566
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_REGION: us-east-1
+      PAYMENT_TOKEN_SERVICE__BASE_URL: http://payment-token:8000
+      PAYMENT_TOKEN_SERVICE__SERVICE_AUTH_TOKEN: service:auth-processor-worker
+      WORKER__SQS_QUEUE_URL: https://sqs.us-east-1.amazonaws.com/000000000000/auth-requests-e2e.fifo
+      WORKER__WORKER_ID: e2e-worker-1
+      WORKER__MAX_RETRIES: 2  # Lower for E2E tests to reduce test time (2 total attempts)
+      ENVIRONMENT: e2e
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: postgres
+      STRIPE__API_KEY: sk_test_placeholder
+    depends_on:
+      postgres:
+        condition: service_healthy
+      localstack-init:
+        condition: service_completed_successfully
+      payment-token:
+        condition: service_healthy
+      authorization-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "ps", "aux", "|", "grep", "-v", "grep", "|", "grep", "python"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - e2e-network
+
+networks:
+  e2e-network:
+    name: payments-e2e-network
+    driver: bridge

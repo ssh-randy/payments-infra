@@ -1,0 +1,55 @@
+# Auth Processor Worker Service Configuration
+# This file provides default configuration values that can be overridden by environment variables
+
+worker:
+  # SQS Configuration
+  sqs_queue_url: "https://sqs.us-east-1.amazonaws.com/.../auth-requests.fifo"
+  batch_size: 1  # Process one message at a time for simplicity
+  wait_time_seconds: 20  # Long polling to reduce empty receives
+  visibility_timeout: 30  # Time before message becomes visible again
+  max_retries: 5  # Maximum retry attempts before sending to DLQ
+  lock_ttl_seconds: 30  # Distributed lock TTL (matches visibility timeout)
+  worker_id: "worker-1"  # Unique identifier for this worker instance
+
+payment_token_service:
+  # Payment Token Service Client
+  base_url: "http://payment-token-service:8000"
+  service_auth_token: ""  # Set via environment variable or secrets manager
+  timeout_seconds: 5
+  max_retries: 2
+
+processors:
+  # Payment Processor Configurations
+  stripe:
+    api_key: ""  # Set via environment variable or secrets manager
+    timeout_seconds: 10
+    statement_descriptor: "Restaurant Payment"
+  
+  # Future processors can be added here
+  # chase:
+  #   merchant_id: ""
+  #   timeout_seconds: 15
+
+database:
+  # PostgreSQL connection for event store and read models
+  url: "postgresql://postgres:postgres@localhost:5432/payment_events"
+  pool_size: 10
+  max_overflow: 20
+  pool_timeout: 30
+
+logging:
+  # Structured logging configuration
+  level: "INFO"
+  format: "json"  # json or console
+  include_correlation_id: true
+
+aws:
+  # AWS Configuration
+  region: "us-east-1"
+  endpoint_url: null  # Set to LocalStack URL for local development
+
+monitoring:
+  # Observability settings
+  enable_metrics: true
+  enable_tracing: false  # Set to true when X-Ray is configured
+  metrics_namespace: "AuthProcessorWorker"

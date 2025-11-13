@@ -40,3 +40,10 @@ target-version = "py311"
 [tool.mypy]
 python_version = "3.11"
 strict = true
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: marks tests as integration tests requiring real database and LocalStack",
+    "e2e: marks tests as end-to-end tests requiring full system integration",
+]
+asyncio_mode = "auto"

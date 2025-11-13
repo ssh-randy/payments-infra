@@ -6,21 +6,37 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     gcc \
     postgresql-client \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Poetry
 RUN pip install poetry
 
 # Copy dependency files
-COPY pyproject.toml ./
-COPY poetry.lock* ./
+COPY services/auth-processor-worker/pyproject.toml ./
+COPY services/auth-processor-worker/poetry.lock* ./
 
 # Install dependencies
 RUN poetry config virtualenvs.create false \
     && poetry install --no-interaction --no-ansi --no-root
 
+# Copy protobuf files from shared directory
+COPY shared/python/payments_proto/ ./payments_proto/
+
+# Create symlink for protobuf imports to work
+RUN ln -s /app/payments_proto/payments /app/payments
+
 # Copy application code
-COPY src/ ./
+COPY services/auth-processor-worker/src/ ./
+COPY services/auth-processor-worker/config.yaml ./config.yaml
+
+# Copy entrypoint script
+COPY services/auth-processor-worker/entrypoint.sh ./entrypoint.sh
+RUN chmod +x ./entrypoint.sh
+
+# Health check (checks if worker process is running)
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD ps aux | grep -v grep | grep python || exit 1
 
 # Run the worker
-CMD ["python", "-m", "auth_processor.worker"]
+CMD ["./entrypoint.sh"]

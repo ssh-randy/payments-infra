@@ -6,30 +6,42 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     gcc \
     postgresql-client \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Poetry
 RUN pip install poetry
 
 # Copy dependency files
-COPY pyproject.toml ./
-COPY poetry.lock* ./
+COPY services/authorization-api/pyproject.toml ./
+COPY services/authorization-api/poetry.lock* ./
 
 # Install dependencies
 RUN poetry config virtualenvs.create false \
     && poetry install --no-interaction --no-ansi --no-root
 
 # Copy protobuf files from shared directory
-COPY ../../shared/python/payments_proto/ ./payments_proto/
+COPY shared/python/payments_proto/ ./payments_proto/
 
 # Create symlink for protobuf imports to work
 RUN ln -s /app/payments_proto/payments /app/payments
 
+# Copy and install migrations dependencies
+COPY infrastructure/migrations/pyproject.toml infrastructure/migrations/poetry.lock* ./migrations/
+RUN cd migrations && poetry config virtualenvs.create false && poetry install --no-interaction --no-ansi --no-root && cd ..
+
+# Copy Alembic configuration and migrations
+COPY infrastructure/migrations ./migrations
+
 # Copy application code
-COPY src/authorization_api ./authorization_api
+COPY services/authorization-api/src/authorization_api ./authorization_api
+
+# Copy entrypoint script
+COPY services/authorization-api/entrypoint.sh ./entrypoint.sh
+RUN chmod +x ./entrypoint.sh
 
 # Expose port
 EXPOSE 8000
 
 # Run the application
-CMD ["uvicorn", "authorization_api.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["./entrypoint.sh"]

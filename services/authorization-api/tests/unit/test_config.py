@@ -10,18 +10,33 @@ from authorization_api.config import Settings
 
 def test_settings_default_values():
     """Test that Settings loads with default values."""
-    settings = Settings()
+    # Save existing env vars
+    saved_db_url = os.environ.get("DATABASE_URL")
+    saved_test_db_url = os.environ.get("TEST_DATABASE_URL")
 
-    assert settings.database_url == "postgresql://postgres:password@localhost:5432/payment_events_db"
-    assert settings.database_pool_min_size == 10
-    assert settings.database_pool_max_size == 20
-    assert settings.aws_region == "us-east-1"
-    assert settings.log_level == "INFO"
-    assert settings.environment == "development"
-    assert settings.service_name == "authorization-api"
-    assert settings.outbox_processor_enabled is True
-    assert settings.outbox_processor_interval_ms == 100
-    assert settings.outbox_processor_batch_size == 100
+    try:
+        # Clear DATABASE_URL to test true defaults
+        os.environ.pop("DATABASE_URL", None)
+        os.environ.pop("TEST_DATABASE_URL", None)
+
+        settings = Settings()
+
+        assert settings.database_url == "postgresql://postgres:password@localhost:5432/payment_events_db"
+        assert settings.database_pool_min_size == 10
+        assert settings.database_pool_max_size == 20
+        assert settings.aws_region == "us-east-1"
+        assert settings.log_level == "INFO"
+        assert settings.environment == "development"
+        assert settings.service_name == "authorization-api"
+        assert settings.outbox_processor_enabled is True
+        assert settings.outbox_processor_interval_ms == 100
+        assert settings.outbox_processor_batch_size == 100
+    finally:
+        # Restore env vars
+        if saved_db_url:
+            os.environ["DATABASE_URL"] = saved_db_url
+        if saved_test_db_url:
+            os.environ["TEST_DATABASE_URL"] = saved_test_db_url
 
 
 def test_settings_from_environment():

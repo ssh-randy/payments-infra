@@ -152,16 +152,26 @@ payments-infra/
 
 ### Running Tests
 
+The project includes comprehensive testing at multiple levels:
+
 ```bash
-# All tests
+# Run all tests (unit + integration + e2e)
 make test
 
-# Specific service
-cd services/payment-token && poetry run pytest
-
-# With coverage
-cd services/payment-token && poetry run pytest --cov
+# Run specific test suites
+make test-unit          # Fast unit tests only
+make test-integration   # Integration tests
+make test-e2e          # Full end-to-end tests with Docker
 ```
+
+**For detailed testing documentation**, see:
+- **[tests/README.md](tests/README.md)** - Integration tests (in-process, fast)
+- **[tests/e2e/README.md](tests/e2e/README.md)** - E2E tests (Docker containers, production-like)
+
+Each test level serves a different purpose:
+- **Unit tests**: Fast, isolated, per-service (run during development)
+- **Integration tests**: Multi-component, in-process (CI/CD, pre-commit)
+- **E2E tests**: Full system, Docker containers (pre-deployment validation)
 
 ### Code Quality
 
@@ -279,9 +289,20 @@ Key metrics to monitor:
 
 ## Documentation
 
+### Architecture & Design
 - [Architecture Deep Dive](docs/specs/)
-- [API Documentation](services/authorization-api/README.md)
 - [Event Catalog](docs/events.md)
+
+### Service Documentation
+- [Authorization API](services/authorization-api/README.md)
+- [Payment Token Service](services/payment-token/README.md)
+- [Auth Processor Worker](services/auth-processor-worker/README.md)
+
+### Testing
+- [Integration Tests](tests/README.md) - In-process multi-component tests
+- [E2E Tests](tests/e2e/README.md) - Full system validation with Docker
+
+### Operations
 - [Runbooks](docs/runbooks/)
 
 ## Troubleshooting

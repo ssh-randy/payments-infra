@@ -1,5 +1,6 @@
 """Read model helpers for auth_request_state table."""
 
+import json
 import uuid
 from datetime import datetime
 from typing import Any
@@ -36,7 +37,7 @@ async def create_auth_request_state(
         currency: ISO currency code
         metadata: Optional metadata
     """
-    metadata_json = metadata or {}
+    metadata_json = json.dumps(metadata or {})
     now = datetime.utcnow()
 
     await conn.execute(

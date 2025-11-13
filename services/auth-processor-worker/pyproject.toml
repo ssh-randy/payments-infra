@@ -1,13 +1,22 @@
 [tool.poetry]
 name = "auth-processor-worker"
 version = "0.1.0"
-description = "Background worker for processing payment authorizations"
+description = "Background worker service for processing payment authorization requests"
 authors = []
 readme = "README.md"
-packages = [{include = "auth_processor", from = "src"}]
+packages = [{include = "auth_processor_worker", from = "src"}]
 
 [tool.poetry.dependencies]
 python = "^3.11"
+asyncpg = "^0.29.0"
+pydantic = "^2.5.0"
+pydantic-settings = "^2.1.0"
+aioboto3 = "^12.3.0"
+structlog = "^24.1.0"
+protobuf = "^4.25.0"
+httpx = "^0.26.0"
+stripe = "^7.0.0"
+pyyaml = "^6.0.1"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.0"
@@ -15,6 +24,11 @@ pytest-asyncio = "^0.23.0"
 black = "^23.12.0"
 ruff = "^0.1.0"
 mypy = "^1.8.0"
+pytest-mock = "^3.12.0"
+moto = "^5.0.0"
+pytest-cov = "^7.0.0"
+alembic = "^1.13.0"
+psycopg2-binary = "^2.9.0"
 
 [build-system]
 requires = ["poetry-core"]
@@ -31,3 +45,17 @@ target-version = "py311"
 [tool.mypy]
 python_version = "3.11"
 strict = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+markers = [
+    "integration: marks tests as integration tests (deselect with '-m \"not integration\"')",
+    "serial: marks tests that must run serially (not in parallel)",
+]
+# Note: Integration tests use a shared SQS queue and should run serially.
+# Run integration tests with: pytest tests/integration -v
+# Do NOT use -n flag (pytest-xdist) for integration tests.

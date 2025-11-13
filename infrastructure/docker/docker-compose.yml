@@ -112,8 +112,8 @@ services:
   # Auth Processor Worker
   auth-processor-worker:
     build:
-      context: ../../services/auth-processor-worker
-      dockerfile: Dockerfile
+      context: ../../
+      dockerfile: services/auth-processor-worker/Dockerfile
     container_name: auth-processor-worker
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:password@postgres:5432/payment_events_db
@@ -121,8 +121,16 @@ services:
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
       AWS_REGION: us-east-1
-      PAYMENT_TOKEN_SERVICE_URL: http://payment-token:8000
-      LOG_LEVEL: DEBUG
+      PAYMENT_TOKEN_SERVICE__BASE_URL: http://payment-token:8000
+      PAYMENT_TOKEN_SERVICE__SERVICE_AUTH_TOKEN: dev-auth-token
+      WORKER__SQS_QUEUE_URL: https://sqs.us-east-1.amazonaws.com/000000000000/auth-requests.fifo
+      WORKER__WORKER_ID: worker-1
+      DEBUG: true
+      ENVIRONMENT: development
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: postgres
+      STRIPE__API_KEY: sk_test_placeholder
     depends_on:
       postgres:
         condition: service_healthy
@@ -131,8 +139,8 @@ services:
       payment-token:
         condition: service_started
     volumes:
-      - ../../services/auth-processor-worker:/app
-    command: python -m auth_processor.worker
+      - ../../services/auth-processor-worker/src:/app/src
+    command: python -m auth_processor_worker.main
 
 volumes:
   postgres_data:

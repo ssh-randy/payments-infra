@@ -1,5 +1,6 @@
 """Event store implementation for writing and reading events."""
 
+import json
 import uuid
 from typing import Any
 
@@ -31,7 +32,7 @@ async def write_event(
         sequence_number: Sequence number for this aggregate
         metadata: Optional metadata (correlation_id, causation_id, etc.)
     """
-    metadata_json = metadata or {}
+    metadata_json = json.dumps(metadata or {})
 
     await conn.execute(
         """

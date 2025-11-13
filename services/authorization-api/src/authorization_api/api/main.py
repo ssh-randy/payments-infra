@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from authorization_api.config import settings
 from authorization_api.infrastructure.database import close_pool, get_pool
 from authorization_api.logging_config import configure_logging
-from authorization_api.api.routes import authorize
+from authorization_api.api.routes import authorize, status
 
 # Configure logging at module level
 configure_logging()
@@ -88,6 +88,7 @@ app = FastAPI(
 
 # Include routers
 app.include_router(authorize.router, tags=["authorization"])
+app.include_router(status.router, tags=["authorization"])
 
 
 @app.get("/health")
