@@ -6,6 +6,7 @@ from typing import AsyncIterator
 
 import structlog
 from fastapi import FastAPI, Response
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from authorization_api.config import settings
@@ -84,6 +85,15 @@ app = FastAPI(
     description="Payment authorization API with event sourcing",
     version="0.1.0",
     lifespan=lifespan,
+)
+
+# Configure CORS for local development
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://localhost:3001"],  # Frontend dev server
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Include routers

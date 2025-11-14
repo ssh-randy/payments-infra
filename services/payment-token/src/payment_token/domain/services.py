@@ -163,12 +163,13 @@ class TokenService:
         service_key_version: str,
         metadata_dict: Optional[dict] = None,
         expiration_hours: int = 24,
+        decrypted_format: str = "protobuf",
     ) -> PaymentToken:
         """Create a payment token from API partner encrypted data.
 
         This implements the API partner key encryption flow (online ordering):
         1. Decrypt data using encryption_metadata (key_id lookup)
-        2. Parse decrypted bytes into PaymentData domain object
+        2. Parse decrypted bytes into PaymentData domain object (protobuf or JSON)
         3. Extract metadata from payment data
         4. Re-encrypt with service rotating key
         5. Create PaymentToken entity
@@ -184,6 +185,7 @@ class TokenService:
             service_key_version: Version of service encryption key
             metadata_dict: Optional metadata from client (merged with extracted)
             expiration_hours: Hours until token expires (default 24)
+            decrypted_format: Format of decrypted data ('protobuf' or 'json')
 
         Returns:
             PaymentToken entity ready for persistence
@@ -206,8 +208,24 @@ class TokenService:
             logger.debug("API partner key decryption successful")
 
             # Step 2: Parse decrypted bytes into PaymentData domain object
-            payment_data = PaymentData.from_bytes(decrypted_bytes)
-            logger.debug("Payment data parsed successfully")
+            if decrypted_format == "json":
+                # Frontend demo flow: Parse JSON
+                import json
+
+                json_data = json.loads(decrypted_bytes.decode("utf-8"))
+                payment_data = PaymentData(
+                    card_number=json_data["card_number"],
+                    exp_month=json_data["exp_month"],
+                    exp_year=json_data["exp_year"],
+                    cvv=json_data["cvv"],
+                    cardholder_name=json_data.get("cardholder_name"),
+                    billing_address=json_data.get("billing_address"),
+                )
+                logger.debug("Payment data parsed from JSON")
+            else:
+                # Production POS terminal flow: Parse protobuf
+                payment_data = PaymentData.from_bytes(decrypted_bytes)
+                logger.debug("Payment data parsed from protobuf")
 
             # Step 3: Extract metadata from payment data
             extracted_metadata = TokenMetadata.from_payment_data(payment_data)

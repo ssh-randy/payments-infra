@@ -1,18 +1,18 @@
 """POST /authorize endpoint implementation."""
 
 import asyncio
+import json
 import uuid
 
 import structlog
-from fastapi import APIRouter, HTTPException, Request, Response
-from fastapi.responses import Response as FastAPIResponse
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse
 
-from payments.v1.authorization_pb2 import (
-    AuthorizeRequest,
-    AuthorizeResponse,
-    AuthStatus,
+from authorization_api.api.models import (
+    AuthorizeRequestJSON,
+    AuthorizeResponseJSON,
+    AuthorizationResultJSON,
 )
-
 from authorization_api.config import settings
 from authorization_api.domain.events import (
     create_auth_request_created_event,
@@ -31,6 +31,38 @@ from authorization_api.infrastructure.outbox import write_outbox_message
 logger = structlog.get_logger()
 
 router = APIRouter()
+
+
+def _build_result_dict(record) -> dict:
+    """Build authorization result dictionary from database record.
+
+    Args:
+        record: Database record with authorization result fields
+
+    Returns:
+        Dictionary with authorization result data
+    """
+    result = {}
+
+    # Add fields if present
+    if record.get("processor_name"):
+        result["processor_name"] = record["processor_name"]
+    if record.get("processor_auth_id"):
+        result["processor_auth_id"] = record["processor_auth_id"]
+    if record.get("processor_auth_code"):
+        result["processor_auth_code"] = record["processor_auth_code"]
+    if record.get("processor_decline_code"):
+        result["processor_decline_code"] = record["processor_decline_code"]
+    if record.get("decline_reason"):
+        result["decline_reason"] = record["decline_reason"]
+    if record.get("network_status"):
+        result["network_status"] = record["network_status"]
+    if record.get("risk_score") is not None:
+        result["risk_score"] = record["risk_score"]
+    if record.get("error_message"):
+        result["error_message"] = record["error_message"]
+
+    return result if result else None
 
 
 async def check_idempotency(
@@ -155,7 +187,7 @@ async def poll_for_completion(
 
 
 @router.post("/v1/authorize")
-async def post_authorize(request: Request) -> Response:
+async def post_authorize(request: Request) -> JSONResponse:
     """Create an authorization request.
 
     Implements the transactional outbox pattern:
@@ -172,24 +204,19 @@ async def post_authorize(request: Request) -> Response:
         request: FastAPI request object
 
     Returns:
-        Protobuf response (200 or 202)
+        JSON response (200 or 202)
     """
-    # Parse protobuf request
+    # Parse JSON request
     body = await request.body()
-    auth_request = AuthorizeRequest()
-    auth_request.ParseFromString(body)
-
-    # Validate required fields
-    if not auth_request.payment_token:
-        raise HTTPException(status_code=400, detail="payment_token is required")
-    if not auth_request.restaurant_id:
-        raise HTTPException(status_code=400, detail="restaurant_id is required")
-    if not auth_request.idempotency_key:
-        raise HTTPException(status_code=400, detail="idempotency_key is required")
-    if auth_request.amount_cents <= 0:
-        raise HTTPException(status_code=400, detail="amount_cents must be positive")
-    if not auth_request.currency:
-        raise HTTPException(status_code=400, detail="currency is required")
+    try:
+        json_data = json.loads(body)
+        auth_request = AuthorizeRequestJSON(**json_data)
+    except Exception as e:
+        logger.error(f"Failed to parse JSON request: {str(e)}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid JSON request: {str(e)}",
+        )
 
     # Parse restaurant_id as UUID
     try:
@@ -227,28 +254,26 @@ async def post_authorize(request: Request) -> Response:
                     status_code=500, detail="Idempotency key exists but request not found"
                 )
 
-            status = map_status_to_proto(record["status"])
-            response = AuthorizeResponse(
-                auth_request_id=str(existing_auth_request_id),
-                status=status,
-            )
+            status = record["status"]
+            response_data = {
+                "auth_request_id": str(existing_auth_request_id),
+                "status": status,
+            }
 
             # Add result if completed
-            if record["status"] in ("AUTHORIZED", "DENIED"):
-                result = build_authorization_result(record)
-                if result:
-                    response.result.CopyFrom(result)
+            if status in ("AUTHORIZED", "DENIED"):
+                result_data = _build_result_dict(record)
+                if result_data:
+                    response_data["result"] = result_data
 
             # Add status URL if still processing
-            if record["status"] in ("PENDING", "PROCESSING"):
-                response.status_url = (
-                    f"/v1/authorize/{existing_auth_request_id}/status"
-                )
+            if status in ("PENDING", "PROCESSING"):
+                response_data["status_url"] = f"/v1/authorize/{existing_auth_request_id}/status"
 
-            return FastAPIResponse(
-                content=response.SerializeToString(),
-                media_type="application/x-protobuf",
-                status_code=200 if status in (AuthStatus.AUTH_STATUS_AUTHORIZED, AuthStatus.AUTH_STATUS_DENIED, AuthStatus.AUTH_STATUS_FAILED) else 202,
+            http_status = 200 if status in ("AUTHORIZED", "DENIED", "FAILED") else 202
+            return JSONResponse(
+                content=response_data,
+                status_code=http_status,
             )
 
     # Generate new auth_request_id
@@ -256,7 +281,7 @@ async def post_authorize(request: Request) -> Response:
     event_id = uuid.uuid4()
 
     # Convert metadata to dict
-    metadata_dict = dict(auth_request.metadata) if auth_request.metadata else None
+    metadata_dict = auth_request.metadata if auth_request.metadata else None
 
     # ATOMIC TRANSACTION: Write event + read model + outbox + idempotency
     async with transaction() as conn:
@@ -331,10 +356,10 @@ async def post_authorize(request: Request) -> Response:
     )
 
     # Build response
-    response = AuthorizeResponse(
-        auth_request_id=str(auth_request_id),
-        status=map_status_to_proto(final_status),
-    )
+    response_data = {
+        "auth_request_id": str(auth_request_id),
+        "status": final_status,
+    }
 
     # Fast path: completed within 5 seconds
     if final_status in ("AUTHORIZED", "DENIED", "FAILED") and result_record:
@@ -345,19 +370,12 @@ async def post_authorize(request: Request) -> Response:
         )
 
         if final_status in ("AUTHORIZED", "DENIED"):
-            # result_record is a dict, create a Record-like object
-            class DictRecord(dict):
-                def __getitem__(self, key):
-                    return super().get(key)
+            result_data = _build_result_dict(result_record)
+            if result_data:
+                response_data["result"] = result_data
 
-            record_obj = DictRecord(result_record)
-            result = build_authorization_result(record_obj)
-            if result:
-                response.result.CopyFrom(result)
-
-        return FastAPIResponse(
-            content=response.SerializeToString(),
-            media_type="application/x-protobuf",
+        return JSONResponse(
+            content=response_data,
             status_code=200,
         )
 
@@ -367,10 +385,9 @@ async def post_authorize(request: Request) -> Response:
         auth_request_id=str(auth_request_id),
     )
 
-    response.status_url = f"/v1/authorize/{auth_request_id}/status"
+    response_data["status_url"] = f"/v1/authorize/{auth_request_id}/status"
 
-    return FastAPIResponse(
-        content=response.SerializeToString(),
-        media_type="application/x-protobuf",
+    return JSONResponse(
+        content=response_data,
         status_code=202,
     )

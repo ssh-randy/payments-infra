@@ -1,5 +1,6 @@
 """Domain events for authorization requests."""
 
+import json
 from dataclasses import dataclass
 from typing import Any
 import uuid
@@ -62,7 +63,13 @@ def create_auth_request_created_event(
     )
 
     if metadata:
-        event.metadata.update(metadata)
+        # Convert metadata values to strings (protobuf map fields only accept strings)
+        for key, value in metadata.items():
+            if isinstance(value, (dict, list)):
+                # Serialize complex types to JSON
+                event.metadata[key] = json.dumps(value)
+            else:
+                event.metadata[key] = str(value)
 
     return event.SerializeToString()
 

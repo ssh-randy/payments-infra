@@ -111,9 +111,13 @@ class PaymentData:
 
     @classmethod
     def from_bytes(cls, data: bytes) -> "PaymentData":
-        """Deserialize payment data from bytes.
+        """Deserialize payment data from protobuf bytes.
 
-        Parses protobuf-encoded PaymentData message.
+        This is used for the POS terminal flow where encrypted data
+        contains protobuf-encoded PaymentData.
+
+        For JSON format (API partner/frontend flow), use the constructor
+        directly after parsing JSON in the API layer.
 
         Args:
             data: Protobuf-encoded PaymentData bytes

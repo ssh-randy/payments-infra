@@ -6,6 +6,7 @@ This module sets up the FastAPI application with all routes and middleware.
 import logging
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
 from payment_token.api.routes import router as public_router
@@ -27,6 +28,15 @@ app = FastAPI(
     version="0.1.0",
     docs_url="/docs" if settings.debug else None,  # Disable docs in production
     redoc_url="/redoc" if settings.debug else None,
+)
+
+# Configure CORS for local development
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://localhost:3001"],  # Frontend dev server
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Include routers

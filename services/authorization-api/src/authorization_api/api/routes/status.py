@@ -4,16 +4,10 @@ import uuid
 
 import asyncpg
 import structlog
-from fastapi import APIRouter, HTTPException, Response
-from fastapi.responses import Response as FastAPIResponse
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import JSONResponse
 
-from payments.v1.authorization_pb2 import GetAuthStatusResponse
-
-from authorization_api.domain.read_models import (
-    get_auth_request_state,
-    build_authorization_result,
-    map_status_to_proto,
-)
+from authorization_api.domain.read_models import get_auth_request_state
 from authorization_api.infrastructure.database import get_connection
 
 logger = structlog.get_logger()
@@ -21,11 +15,43 @@ logger = structlog.get_logger()
 router = APIRouter()
 
 
+def _build_result_dict(record) -> dict:
+    """Build authorization result dictionary from database record.
+
+    Args:
+        record: Database record with authorization result fields
+
+    Returns:
+        Dictionary with authorization result data
+    """
+    result = {}
+
+    # Add fields if present
+    if record.get("processor_name"):
+        result["processor_name"] = record["processor_name"]
+    if record.get("processor_auth_id"):
+        result["processor_auth_id"] = record["processor_auth_id"]
+    if record.get("processor_auth_code"):
+        result["processor_auth_code"] = record["processor_auth_code"]
+    if record.get("processor_decline_code"):
+        result["processor_decline_code"] = record["processor_decline_code"]
+    if record.get("decline_reason"):
+        result["decline_reason"] = record["decline_reason"]
+    if record.get("network_status"):
+        result["network_status"] = record["network_status"]
+    if record.get("risk_score") is not None:
+        result["risk_score"] = record["risk_score"]
+    if record.get("error_message"):
+        result["error_message"] = record["error_message"]
+
+    return result if result else None
+
+
 async def build_status_response(
     conn: asyncpg.Connection,
     auth_request_id: uuid.UUID,
     restaurant_id: uuid.UUID,
-) -> GetAuthStatusResponse:
+) -> dict:
     """Build status response from database record.
 
     Args:
@@ -34,7 +60,7 @@ async def build_status_response(
         restaurant_id: Restaurant UUID
 
     Returns:
-        GetAuthStatusResponse protobuf
+        Dictionary with status response data
 
     Raises:
         HTTPException: 404 if not found or restaurant mismatch
@@ -59,19 +85,19 @@ async def build_status_response(
         )
         raise HTTPException(status_code=404, detail="Auth request not found")
 
-    # Build protobuf response
-    response = GetAuthStatusResponse(
-        auth_request_id=str(auth_request_id),
-        status=map_status_to_proto(record["status"]),
-        created_at=int(record["created_at"].timestamp()),
-        updated_at=int(record["updated_at"].timestamp()),
-    )
+    # Build JSON response
+    response = {
+        "auth_request_id": str(auth_request_id),
+        "status": record["status"],
+        "created_at": int(record["created_at"].timestamp()),
+        "updated_at": int(record["updated_at"].timestamp()),
+    }
 
     # Add authorization result if completed (AUTHORIZED or DENIED)
     if record["status"] in ("AUTHORIZED", "DENIED"):
-        result = build_authorization_result(record)
+        result = _build_result_dict(record)
         if result:
-            response.result.CopyFrom(result)
+            response["result"] = result
 
     logger.info(
         "get_status_success",
@@ -83,7 +109,7 @@ async def build_status_response(
 
 
 @router.get("/v1/authorize/{auth_request_id}/status")
-async def get_status(auth_request_id: str, restaurant_id: str) -> Response:
+async def get_status(auth_request_id: str, restaurant_id: str) -> JSONResponse:
     """Get authorization request status.
 
     Reads from the auth_request_state read model to return current status.
@@ -94,7 +120,7 @@ async def get_status(auth_request_id: str, restaurant_id: str) -> Response:
         restaurant_id: Restaurant UUID (query parameter)
 
     Returns:
-        GetAuthStatusResponse protobuf with current status
+        JSON response with current status
 
     Raises:
         HTTPException: 400 if invalid UUIDs, 404 if not found or restaurant mismatch
@@ -124,8 +150,7 @@ async def get_status(auth_request_id: str, restaurant_id: str) -> Response:
             conn, auth_request_uuid, restaurant_uuid
         )
 
-        return FastAPIResponse(
-            content=response.SerializeToString(),
-            media_type="application/x-protobuf",
+        return JSONResponse(
+            content=response,
             status_code=200,
         )

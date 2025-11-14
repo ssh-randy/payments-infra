@@ -3,7 +3,7 @@ export const CONFIG = {
 
   // Service URLs (configurable for local vs deployed)
   PAYMENT_TOKEN_SERVICE_URL: import.meta.env.VITE_PAYMENT_TOKEN_SERVICE_URL || 'http://localhost:8001',
-  AUTHORIZATION_API_URL: import.meta.env.VITE_AUTHORIZATION_API_URL || 'http://localhost:8002',
+  AUTHORIZATION_API_URL: import.meta.env.VITE_AUTHORIZATION_API_URL || 'http://localhost:8000',
 
   // API Partner Encryption Key
   API_PARTNER_KEY_ID: 'demo-primary-key-001',
