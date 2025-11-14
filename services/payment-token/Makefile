@@ -24,17 +24,33 @@ test-unit: ## Run unit tests only (no infrastructure needed)
 
 test-integration: test-setup ## Run integration tests (starts infrastructure automatically)
 	@echo "Running integration tests..."
-	@poetry run pytest tests/integration -v
+	@TEST_DATABASE_URL="postgresql://postgres:password@localhost:5433/payment_tokens_test" \
+	 AWS_ENDPOINT_URL=http://localhost:4566 \
+	 AWS_ACCESS_KEY_ID=test \
+	 AWS_SECRET_ACCESS_KEY=test \
+	 AWS_REGION=us-east-1 \
+	 poetry run pytest tests/integration -v
 	@$(MAKE) test-teardown
 
 test-e2e: test-setup ## Run E2E tests (starts infrastructure automatically)
 	@echo "Running E2E tests..."
-	@poetry run pytest tests/e2e -v
+	@TEST_DATABASE_URL="postgresql://postgres:password@localhost:5433/payment_tokens_test" \
+	 AWS_ENDPOINT_URL=http://localhost:4566 \
+	 AWS_ACCESS_KEY_ID=test \
+	 AWS_SECRET_ACCESS_KEY=test \
+	 AWS_REGION=us-east-1 \
+	 poetry run pytest tests/e2e -v
 	@$(MAKE) test-teardown
 
 test-all: test-setup ## Run all tests (unit + integration + e2e)
 	@echo "Running all tests..."
-	@poetry run pytest tests/unit tests/integration tests/e2e -v
+	@poetry run pytest tests/unit -v
+	@TEST_DATABASE_URL="postgresql://postgres:password@localhost:5433/payment_tokens_test" \
+	 AWS_ENDPOINT_URL=http://localhost:4566 \
+	 AWS_ACCESS_KEY_ID=test \
+	 AWS_SECRET_ACCESS_KEY=test \
+	 AWS_REGION=us-east-1 \
+	 poetry run pytest tests/integration tests/e2e -v
 	@$(MAKE) test-teardown
 
 test: test-all ## Alias for test-all (default target)
