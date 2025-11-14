@@ -1,4 +1,4 @@
-.PHONY: help setup proto install test test-unit test-integration test-e2e test-e2e-root test-e2e-cleanup lint format docker-up docker-down clean
+.PHONY: help setup proto install test test-unit test-integration test-e2e test-e2e-root test-e2e-cleanup lint format dev docker-up docker-down clean
 
 # Colors for output
 BLUE := \033[0;34m
@@ -94,6 +94,32 @@ typecheck: ## Run type checking (mypy)
 	cd services/payment-token && poetry run mypy src
 	cd services/authorization-api && poetry run mypy src
 	cd services/auth-processor-worker && poetry run mypy src
+
+dev: ## Start local dev environment with full initialization (docker + localstack + db)
+	@echo "$(BLUE)Starting local development environment...$(NC)"
+	docker-compose -f infrastructure/docker/docker-compose.yml up -d
+	@echo "$(GREEN)✓ Docker services started$(NC)"
+	@echo "Waiting for LocalStack to be ready..."
+	@timeout=60; while [ $$timeout -gt 0 ]; do \
+		if curl -s http://localhost:4566/_localstack/health | grep -q '"sqs":'; then \
+			echo "$(GREEN)✓ LocalStack is ready$(NC)"; \
+			break; \
+		fi; \
+		sleep 2; \
+		timeout=$$((timeout - 2)); \
+	done
+	@echo "Initializing LocalStack (SQS queues, KMS keys)..."
+	./scripts/init_localstack.sh
+	@echo "Setting up databases..."
+	./scripts/setup_local_db.sh
+	@echo "$(GREEN)✓ Local environment ready!$(NC)"
+	@echo ""
+	@echo "Services available at:"
+	@echo "  Payment Token API:    http://localhost:8001"
+	@echo "  Authorization API:    http://localhost:8000"
+	@echo "  LocalStack:           http://localhost:4566"
+	@echo ""
+	@echo "To validate: cd tests && PYTHONPATH=../:../shared/python:../shared/python/payments_proto .tox/quick/bin/python ../scripts/validate_local_env.py"
 
 docker-up: ## Start local development environment (docker-compose)
 	@echo "$(BLUE)Starting local environment...$(NC)"

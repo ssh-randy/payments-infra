@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y \
     gcc \
     postgresql-client \
     curl \
+    procps \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Poetry

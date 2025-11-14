@@ -13,8 +13,8 @@ done
 
 # Create databases
 echo "Creating databases..."
-docker exec payments-postgres psql -U postgres -c "CREATE DATABASE IF NOT EXISTS payment_events_db;"
-docker exec payments-postgres psql -U postgres -c "CREATE DATABASE IF NOT EXISTS payment_tokens_db;"
+docker exec payments-postgres psql -U postgres -tc "SELECT 1 FROM pg_database WHERE datname = 'payment_events_db'" | grep -q 1 || docker exec payments-postgres psql -U postgres -c "CREATE DATABASE payment_events_db;"
+docker exec payments-postgres psql -U postgres -tc "SELECT 1 FROM pg_database WHERE datname = 'payment_tokens_db'" | grep -q 1 || docker exec payments-postgres psql -U postgres -c "CREATE DATABASE payment_tokens_db;"
 
 # Run migrations (placeholder - to be implemented with alembic)
 echo "Running migrations..."

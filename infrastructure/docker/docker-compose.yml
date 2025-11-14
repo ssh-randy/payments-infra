@@ -56,32 +56,37 @@ services:
   # Payment Token Service
   payment-token:
     build:
-      context: ../../services/payment-token
-      dockerfile: Dockerfile
+      context: ../..
+      dockerfile: services/payment-token/Dockerfile
     container_name: payment-token-service
     ports:
       - "8001:8000"
     environment:
-      DATABASE_URL: postgresql+asyncpg://postgres:password@postgres-tokens:5432/payment_tokens_db
+      DATABASE_URL: postgresql://postgres:password@postgres-tokens:5432/payment_tokens_db
       AWS_ENDPOINT_URL: http://localstack:4566
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
       AWS_REGION: us-east-1
+      BDK_KMS_KEY_ID: alias/test-bdk-key
+      TEST_BDK_BASE64: MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=
+      PRIMARY_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      INTERNAL_SERVICE_TOKEN: dev-auth-token
       LOG_LEVEL: DEBUG
+      PYTHONPATH: /app
     depends_on:
       postgres-tokens:
         condition: service_healthy
       localstack:
         condition: service_healthy
     volumes:
-      - ../../services/payment-token:/app
+      - ../../services/payment-token/src/payment_token:/app/payment_token
     command: uvicorn payment_token.api.main:app --host 0.0.0.0 --port 8000 --reload
 
   # Authorization API Service
   authorization-api:
     build:
-      context: ../../services/authorization-api
-      dockerfile: Dockerfile
+      context: ../..
+      dockerfile: services/authorization-api/Dockerfile
     container_name: authorization-api-service
     ports:
       - "8000:8000"
@@ -91,8 +96,10 @@ services:
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
       AWS_REGION: us-east-1
+      AUTH_REQUESTS_QUEUE_URL: http://sqs.us-east-1.localhost.localstack.cloud:4566/000000000000/payment-auth-requests.fifo
       PAYMENT_TOKEN_SERVICE_URL: http://payment-token:8000
       LOG_LEVEL: DEBUG
+      PYTHONPATH: /app
     depends_on:
       postgres:
         condition: service_healthy
@@ -101,24 +108,24 @@ services:
       payment-token:
         condition: service_started
     volumes:
-      - ../../services/authorization-api/src:/app
+      - ../../services/authorization-api/src/authorization_api:/app/authorization_api
     command: uvicorn authorization_api.api.main:app --host 0.0.0.0 --port 8000 --reload
 
   # Auth Processor Worker
   auth-processor-worker:
     build:
-      context: ../../
+      context: ../..
       dockerfile: services/auth-processor-worker/Dockerfile
     container_name: auth-processor-worker
     environment:
-      DATABASE_URL: postgresql+asyncpg://postgres:password@postgres:5432/payment_events_db
+      DATABASE_URL: postgresql://postgres:password@postgres:5432/payment_events_db
       AWS_ENDPOINT_URL: http://localstack:4566
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
       AWS_REGION: us-east-1
       PAYMENT_TOKEN_SERVICE__BASE_URL: http://payment-token:8000
-      PAYMENT_TOKEN_SERVICE__SERVICE_AUTH_TOKEN: dev-auth-token
-      WORKER__SQS_QUEUE_URL: https://sqs.us-east-1.amazonaws.com/000000000000/auth-requests.fifo
+      PAYMENT_TOKEN_SERVICE__SERVICE_AUTH_TOKEN: service:auth-processor-worker
+      WORKER__SQS_QUEUE_URL: http://sqs.us-east-1.localhost.localstack.cloud:4566/000000000000/payment-auth-requests.fifo
       WORKER__WORKER_ID: worker-1
       DEBUG: true
       ENVIRONMENT: development
@@ -126,6 +133,7 @@ services:
       POSTGRES_PORT: 5432
       POSTGRES_USER: postgres
       STRIPE__API_KEY: sk_test_placeholder
+      PYTHONPATH: /app/src
     depends_on:
       postgres:
         condition: service_healthy
@@ -134,7 +142,7 @@ services:
       payment-token:
         condition: service_started
     volumes:
-      - ../../services/auth-processor-worker/src:/app/src
+      - ../../services/auth-processor-worker/src/auth_processor_worker:/app/src/auth_processor_worker
     command: python -m auth_processor_worker.main
 
 volumes:

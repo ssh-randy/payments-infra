@@ -6,7 +6,7 @@ set -e
 echo "Initializing LocalStack (SQS queues)..."
 
 # Wait for LocalStack to be ready
-until curl -s http://localhost:4566/_localstack/health | grep -q '"sqs": "available"'; do
+until curl -s http://localhost:4566/_localstack/health | grep -q '"sqs":'; do
     echo "Waiting for LocalStack SQS..."
     sleep 2
 done
