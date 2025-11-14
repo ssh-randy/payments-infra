@@ -25,6 +25,8 @@ def stripe_api_key():
 
 
 @pytest.mark.integration
+@pytest.mark.external
+@pytest.mark.stripe
 class TestStripeWithTokens:
     """Test Stripe integration using test tokens (no raw card data)."""
 

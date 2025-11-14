@@ -134,6 +134,7 @@ async def decrypt_payment_token(
             encrypted_payment_data=token_model.encrypted_payment_data,
             encryption_key_version=token_model.encryption_key_version,
             device_token=token_model.device_token,
+            encryption_key_id=token_model.encryption_key_id,
             created_at=token_model.created_at,
             expires_at=token_model.expires_at,
         )

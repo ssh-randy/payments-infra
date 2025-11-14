@@ -12,7 +12,8 @@ terraform {
 
   # Backend configuration is provided via backend-config.hcl
   # Run: terraform init -backend-config=backend-config.hcl
-  backend "s3" {}
+  # For local development, comment out the S3 backend to use local state
+  # backend "s3" {}
 }
 
 provider "aws" {
@@ -46,4 +47,19 @@ output "aws_region" {
 output "environment" {
   description = "Environment name"
   value       = var.environment
+}
+
+# ECR Repositories for container images
+module "ecr" {
+  source = "../../modules/ecr"
+
+  environment            = var.environment
+  service_names          = ["payment-token", "authorization-api", "auth-processor-worker"]
+  image_retention_count  = 10
+}
+
+# Output ECR repository URLs for reference
+output "ecr_repository_urls" {
+  description = "ECR repository URLs for all services"
+  value       = module.ecr.repository_urls
 }

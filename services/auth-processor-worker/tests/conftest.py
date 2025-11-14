@@ -249,6 +249,7 @@ async def write_void_event(db_conn):
     Returns:
         Callable: Async function to write void event
     """
+    import json
     from datetime import datetime
     from payments_proto.payments.v1 import events_pb2
 
@@ -290,7 +291,7 @@ async def write_void_event(db_conn):
             """,
             auth_request_id,
             event_data.SerializeToString(),
-            {"test": "void_event"},
+            json.dumps({"test": "void_event"}),
         )
 
         return result["sequence_number"]

@@ -77,6 +77,8 @@ def insufficient_funds_payment_data():
 
 
 @pytest.mark.integration
+@pytest.mark.external
+@pytest.mark.stripe
 class TestStripeRealAPIAuthorization:
     """Test successful authorization against real Stripe API."""
 
@@ -237,6 +239,8 @@ class TestStripeRealAPIAuthorization:
 
 
 @pytest.mark.integration
+@pytest.mark.external
+@pytest.mark.stripe
 class TestStripeRealAPIDeclines:
     """Test card declines against real Stripe API."""
 
@@ -283,6 +287,8 @@ class TestStripeRealAPIDeclines:
 
 
 @pytest.mark.integration
+@pytest.mark.external
+@pytest.mark.stripe
 class TestStripeRealAPIConfiguration:
     """Test configuration options against real Stripe API."""
 
@@ -347,6 +353,8 @@ class TestStripeRealAPIConfiguration:
 
 
 @pytest.mark.integration
+@pytest.mark.external
+@pytest.mark.stripe
 class TestStripeRealAPICurrencies:
     """Test different currencies against real Stripe API."""
 

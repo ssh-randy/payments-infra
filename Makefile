@@ -1,4 +1,4 @@
-.PHONY: help setup proto install test lint format docker-up docker-down clean
+.PHONY: help setup proto install test test-unit test-integration test-e2e test-e2e-root test-e2e-cleanup lint format docker-up docker-down clean
 
 # Colors for output
 BLUE := \033[0;34m
@@ -7,7 +7,7 @@ NC := \033[0m # No Color
 
 help: ## Show this help message
 	@echo "$(BLUE)Available targets:$(NC)"
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(GREEN)%-20s$(NC) %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(GREEN)%-20s$(NC) %s\n", $$1, $$2}'
 
 setup: ## Initial setup (install dependencies and generate protos)
 	@echo "$(BLUE)Setting up project...$(NC)"
@@ -33,29 +33,47 @@ install: ## Install all dependencies
 	cd services/authorization-api && poetry install
 	cd services/auth-processor-worker && poetry install
 
-test: ## Run all tests
+test: ## Run all tests (services + root-level e2e)
 	@echo "$(BLUE)Running tests...$(NC)"
-	cd services/payment-token && poetry run pytest
-	cd services/authorization-api && poetry run pytest
-	cd services/auth-processor-worker && poetry run pytest
+	@echo "Testing payment-token service..."
+	cd services/payment-token && $(MAKE) test
+	@echo "Testing authorization-api service..."
+	cd services/authorization-api && $(MAKE) test
+	@echo "Testing auth-processor-worker service..."
+	cd services/auth-processor-worker && $(MAKE) test
+	@echo "Testing shared/payments_common..."
 	cd shared/python/payments_common && poetry run pytest
+	@echo "$(BLUE)Running root-level E2E tests...$(NC)"
+	cd tests && tox -e e2e
 
-test-unit: ## Run unit tests only
+test-unit: ## Run unit tests only (no infrastructure needed)
 	@echo "$(BLUE)Running unit tests...$(NC)"
-	cd services/payment-token && poetry run pytest tests/unit
-	cd services/authorization-api && poetry run pytest tests/unit
-	cd services/auth-processor-worker && poetry run pytest tests/unit
+	cd services/payment-token && $(MAKE) test-unit
+	cd services/authorization-api && $(MAKE) test-unit
+	cd services/auth-processor-worker && $(MAKE) test-unit
 
-test-integration: ## Run integration tests
+test-integration: ## Run integration tests (starts/stops infrastructure per service)
 	@echo "$(BLUE)Running integration tests...$(NC)"
-	cd services/payment-token && poetry run pytest tests/integration
-	cd services/authorization-api && poetry run pytest tests/integration
-	cd services/auth-processor-worker && poetry run pytest tests/integration
-	poetry run pytest tests/integration
+	cd services/payment-token && $(MAKE) test-integration
+	cd services/authorization-api && $(MAKE) test-integration
+	cd services/auth-processor-worker && $(MAKE) test-integration
 
-test-e2e: ## Run end-to-end tests
+test-e2e: ## Run all end-to-end tests (services + root)
 	@echo "$(BLUE)Running e2e tests...$(NC)"
-	poetry run pytest tests/e2e
+	cd services/payment-token && $(MAKE) test-e2e
+	cd services/authorization-api && $(MAKE) test-e2e
+	@echo "Running root-level e2e tests..."
+	cd tests && tox -e e2e
+
+test-e2e-root: ## Run only root-level end-to-end tests
+	@echo "$(BLUE)Running root-level E2E tests only...$(NC)"
+	cd tests && tox -e e2e
+
+test-e2e-cleanup: ## Clean up E2E test Docker containers and volumes
+	@echo "$(BLUE)Cleaning up E2E test environment...$(NC)"
+	docker-compose -f infrastructure/docker/docker-compose.e2e.yml down -v || true
+	docker rm -f payments-localstack payments-postgres payments-postgres-tokens 2>/dev/null || true
+	@echo "$(GREEN)E2E test environment cleaned up$(NC)"
 
 lint: ## Run linters (ruff)
 	@echo "$(BLUE)Running linters...$(NC)"

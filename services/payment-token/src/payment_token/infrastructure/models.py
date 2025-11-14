@@ -52,9 +52,14 @@ class PaymentToken(Base):
         String(50), nullable=False, comment="Version of encryption key used"
     )
 
-    # Original device token (for audit purposes)
-    device_token: Mapped[str] = mapped_column(
-        String(255), nullable=False, comment="Device identifier used for original encryption"
+    # Key ID used for encryption (API partner keys)
+    encryption_key_id: Mapped[str | None] = mapped_column(
+        String(255), nullable=True, comment='Key ID used for encryption (e.g., "primary", "ak_{uuid}", "bdk_{id}")'
+    )
+
+    # Original device token (for audit purposes, nullable for API partner key flow)
+    device_token: Mapped[str | None] = mapped_column(
+        String(255), nullable=True, comment="Device identifier used for original encryption (null for API partner keys)"
     )
 
     # Lifecycle timestamps

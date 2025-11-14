@@ -64,6 +64,10 @@ services:
       # Matches TEST_BDK = b"0" * 32 in conftest.py
       # In production, this would NEVER be set - BDK comes from KMS only
       TEST_BDK_BASE64: MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=
+      # Primary encryption key for API partner key flow (demo/testing only)
+      # Matches PRIMARY_KEY_HEX in test_api_partner_key_e2e.py
+      # In production, this would come from AWS KMS or Secrets Manager
+      PRIMARY_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
     depends_on:
       postgres-test:
         condition: service_healthy

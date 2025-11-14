@@ -1,12 +1,23 @@
 """Integration tests for SQS consumer with LocalStack."""
 
 import asyncio
+import base64
 import json
 import os
+import sys
 import uuid
+from pathlib import Path
 
 import aioboto3
 import pytest
+import pytest_asyncio
+
+# Add shared proto directory to Python path
+_shared_proto_path = Path(__file__).parent.parent.parent.parent.parent.parent / "shared" / "python"
+if str(_shared_proto_path) not in sys.path:
+    sys.path.insert(0, str(_shared_proto_path))
+
+from payments_proto.payments.v1 import events_pb2
 
 from auth_processor_worker.infrastructure.sqs_consumer import SQSConsumer
 
@@ -18,7 +29,7 @@ AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
 pytestmark = pytest.mark.integration
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def sqs_client():
     """Create an SQS client connected to LocalStack."""
     session = aioboto3.Session()
@@ -32,7 +43,7 @@ async def sqs_client():
         yield client
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def test_queue(sqs_client):
     """Create a test FIFO queue in LocalStack."""
     # Generate unique queue name
@@ -83,32 +94,31 @@ async def test_sqs_consumer_receives_and_processes_message(sqs_client, test_queu
 
     # Send a test message to the queue
     auth_request_id = f"auth-req-{uuid.uuid4().hex}"
-    message_body = {
-        "auth_request_id": auth_request_id,
-        "restaurant_id": "rest-123",
-        "amount_cents": 5000,
-    }
+
+    # Create protobuf message
+    import time
+    queued_msg = events_pb2.AuthRequestQueuedMessage(
+        auth_request_id=auth_request_id,
+        restaurant_id="rest-123",
+        created_at=int(time.time()),
+    )
+
+    # Serialize and base64 encode
+    message_bytes = queued_msg.SerializeToString()
+    message_body = base64.b64encode(message_bytes).decode('utf-8')
 
     await sqs_client.send_message(
         QueueUrl=test_queue,
-        MessageBody=json.dumps(message_body),
+        MessageBody=message_body,
         MessageGroupId="test-group",
         MessageDeduplicationId=auth_request_id,
     )
 
-    # Initialize consumer client manually for testing
-    session = aioboto3.Session()
-    async with session.client(
-        "sqs",
-        region_name=AWS_REGION,
-        endpoint_url=LOCALSTACK_ENDPOINT,
-        aws_access_key_id="test",
-        aws_secret_access_key="test",
-    ) as sqs_test_client:
-        consumer._sqs_client = sqs_test_client
+    # Use the sqs_client fixture instead of creating a new session
+    consumer._sqs_client = sqs_client
 
-        # Process messages (should receive and process the message)
-        await consumer.process_messages()
+    # Process messages (should receive and process the message)
+    await consumer.process_messages()
 
     # Verify message was processed
     assert len(processed_messages) == 1
@@ -144,33 +154,37 @@ async def test_sqs_consumer_handles_multiple_messages(sqs_client, test_queue):
     )
 
     # Send multiple messages
+    import time
     message_ids = []
     for i in range(3):
         auth_request_id = f"auth-req-{uuid.uuid4().hex}"
         message_ids.append(auth_request_id)
 
+        # Create protobuf message
+        queued_msg = events_pb2.AuthRequestQueuedMessage(
+            auth_request_id=auth_request_id,
+            restaurant_id="rest-123",
+            created_at=int(time.time()),
+        )
+
+        # Serialize and base64 encode
+        message_bytes = queued_msg.SerializeToString()
+        message_body = base64.b64encode(message_bytes).decode('utf-8')
+
         await sqs_client.send_message(
             QueueUrl=test_queue,
-            MessageBody=json.dumps({"auth_request_id": auth_request_id}),
+            MessageBody=message_body,
             MessageGroupId="test-group",
             MessageDeduplicationId=auth_request_id,
         )
 
-    # Initialize consumer client
-    session = aioboto3.Session()
-    async with session.client(
-        "sqs",
-        region_name=AWS_REGION,
-        endpoint_url=LOCALSTACK_ENDPOINT,
-        aws_access_key_id="test",
-        aws_secret_access_key="test",
-    ) as sqs_test_client:
-        consumer._sqs_client = sqs_test_client
+    # Use the sqs_client fixture instead of creating a new session
+    consumer._sqs_client = sqs_client
 
-        # Process messages (FIFO queue processes one at a time per group)
-        # We need to call process_messages multiple times
-        for _ in range(3):
-            await consumer.process_messages()
+    # Process messages (FIFO queue processes one at a time per group)
+    # We need to call process_messages multiple times
+    for _ in range(3):
+        await consumer.process_messages()
 
     # Verify all messages were processed
     assert len(processed_messages) == 3
@@ -199,35 +213,40 @@ async def test_sqs_consumer_retry_on_handler_failure(sqs_client, test_queue):
     )
 
     # Send a test message
+    import time
     auth_request_id = f"auth-req-{uuid.uuid4().hex}"
+
+    # Create protobuf message
+    queued_msg = events_pb2.AuthRequestQueuedMessage(
+        auth_request_id=auth_request_id,
+        restaurant_id="rest-123",
+        created_at=int(time.time()),
+    )
+
+    # Serialize and base64 encode
+    message_bytes = queued_msg.SerializeToString()
+    message_body = base64.b64encode(message_bytes).decode('utf-8')
+
     await sqs_client.send_message(
         QueueUrl=test_queue,
-        MessageBody=json.dumps({"auth_request_id": auth_request_id}),
+        MessageBody=message_body,
         MessageGroupId="test-group",
         MessageDeduplicationId=auth_request_id,
     )
 
-    # Initialize consumer client
-    session = aioboto3.Session()
-    async with session.client(
-        "sqs",
-        region_name=AWS_REGION,
-        endpoint_url=LOCALSTACK_ENDPOINT,
-        aws_access_key_id="test",
-        aws_secret_access_key="test",
-    ) as sqs_test_client:
-        consumer._sqs_client = sqs_test_client
+    # Use the sqs_client fixture instead of creating a new session
+    consumer._sqs_client = sqs_client
 
-        # First attempt - should fail
-        await consumer.process_messages()
-        assert attempt_count == 1
+    # First attempt - should fail
+    await consumer.process_messages()
+    assert attempt_count == 1
 
-        # Wait for visibility timeout to expire
-        await asyncio.sleep(3)
+    # Wait for visibility timeout to expire
+    await asyncio.sleep(3)
 
-        # Second attempt - should receive same message again
-        await consumer.process_messages()
-        assert attempt_count == 2
+    # Second attempt - should receive same message again
+    await consumer.process_messages()
+    assert attempt_count == 2
 
 
 @pytest.mark.asyncio
@@ -256,19 +275,11 @@ async def test_sqs_consumer_handles_malformed_messages(sqs_client, test_queue):
         MessageDeduplicationId=f"msg-{uuid.uuid4().hex}",
     )
 
-    # Initialize consumer client
-    session = aioboto3.Session()
-    async with session.client(
-        "sqs",
-        region_name=AWS_REGION,
-        endpoint_url=LOCALSTACK_ENDPOINT,
-        aws_access_key_id="test",
-        aws_secret_access_key="test",
-    ) as sqs_test_client:
-        consumer._sqs_client = sqs_test_client
+    # Use the sqs_client fixture instead of creating a new session
+    consumer._sqs_client = sqs_client
 
-        # Process messages
-        await consumer.process_messages()
+    # Process messages
+    await consumer.process_messages()
 
     # Handler should not have been called
     assert len(processed_messages) == 0
@@ -301,19 +312,11 @@ async def test_sqs_consumer_no_messages_available(sqs_client, test_queue):
         message_handler=message_handler,
     )
 
-    # Initialize consumer client
-    session = aioboto3.Session()
-    async with session.client(
-        "sqs",
-        region_name=AWS_REGION,
-        endpoint_url=LOCALSTACK_ENDPOINT,
-        aws_access_key_id="test",
-        aws_secret_access_key="test",
-    ) as sqs_test_client:
-        consumer._sqs_client = sqs_test_client
+    # Use the sqs_client fixture instead of creating a new session
+    consumer._sqs_client = sqs_client
 
-        # Process messages (queue is empty)
-        await consumer.process_messages()
+    # Process messages (queue is empty)
+    await consumer.process_messages()
 
     # No messages should be processed
     assert len(processed_messages) == 0

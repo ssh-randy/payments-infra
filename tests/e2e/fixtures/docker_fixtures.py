@@ -72,10 +72,11 @@ def docker_services(docker_compose_file: Path) -> Generator[None, None, None]:
     """Start all services via docker-compose.
 
     This fixture:
-    1. Starts all services defined in docker-compose.e2e.yml
-    2. Waits for services to be healthy
-    3. Yields control to tests
-    4. Cleans up by stopping and removing containers
+    1. Cleans up any existing containers from previous runs
+    2. Starts all services defined in docker-compose.e2e.yml
+    3. Waits for services to be healthy
+    4. Yields control to tests
+    5. Cleans up by stopping and removing containers
 
     Yields:
         None (services are available at their exposed ports)
@@ -83,6 +84,50 @@ def docker_services(docker_compose_file: Path) -> Generator[None, None, None]:
     print("\n" + "=" * 80)
     print("Starting Docker services for E2E tests...")
     print("=" * 80)
+
+    # Check if Docker is running
+    docker_check = subprocess.run(
+        ["docker", "info"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if docker_check.returncode != 0:
+        raise RuntimeError(
+            "Docker is not running. Please start Docker Desktop and try again.\n"
+            f"Error: {docker_check.stderr}"
+        )
+
+    # Clean up any existing containers from previous runs
+    print("Cleaning up any existing E2E test containers...")
+
+    # First, use docker-compose down to clean up containers from the compose file
+    subprocess.run(
+        ["docker-compose", "-f", str(docker_compose_file), "down", "-v"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    # Also explicitly remove any containers with conflicting names
+    # (in case they were created outside of docker-compose)
+    container_names = [
+        "payments-localstack",
+        "payments-postgres",
+        "payments-postgres-tokens",
+        "authorization-api",
+        "payment-token",
+        "auth-processor-worker",
+    ]
+    for container_name in container_names:
+        subprocess.run(
+            ["docker", "rm", "-f", container_name],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+    print("Cleanup complete.")
 
     # Start services
     try:

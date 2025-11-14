@@ -55,7 +55,12 @@ python_functions = ["test_*"]
 markers = [
     "integration: marks tests as integration tests (deselect with '-m \"not integration\"')",
     "serial: marks tests that must run serially (not in parallel)",
+    "external: tests that use real external APIs (Stripe, etc) and require API keys",
+    "stripe: tests specific to Stripe integration",
+    "slow: slow-running tests (>5s)",
 ]
 # Note: Integration tests use a shared SQS queue and should run serially.
 # Run integration tests with: pytest tests/integration -v
 # Do NOT use -n flag (pytest-xdist) for integration tests.
+# Run tests excluding external dependencies: pytest -m "not external"
+# Run only external tests: pytest -m external (requires STRIPE_TEST_API_KEY)

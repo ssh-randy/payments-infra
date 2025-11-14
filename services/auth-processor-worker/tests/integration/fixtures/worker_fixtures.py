@@ -32,6 +32,8 @@ class WorkerTestInstance:
         batch_size: int = 1,
         wait_time_seconds: int = 5,  # Shorter for tests
         visibility_timeout: int = 30,
+        sqs_client: Any = None,
+        payment_token_client: Any = None,
     ):
         """
         Initialize a worker test instance.
@@ -42,12 +44,16 @@ class WorkerTestInstance:
             batch_size: Number of messages to process per batch
             wait_time_seconds: SQS long polling wait time
             visibility_timeout: SQS message visibility timeout
+            sqs_client: Pre-configured SQS client (for tests, to avoid event loop conflicts)
+            payment_token_client: Optional payment token client to inject (for testing)
         """
         self.queue_url = queue_url
         self.worker_id = worker_id or f"test-worker-{uuid.uuid4().hex[:8]}"
         self.batch_size = batch_size
         self.wait_time_seconds = wait_time_seconds
         self.visibility_timeout = visibility_timeout
+        self.sqs_client = sqs_client
+        self.payment_token_client = payment_token_client
 
         self.sqs_consumer: SQSConsumer | None = None
         self.running = False
@@ -76,6 +82,7 @@ class WorkerTestInstance:
                 auth_request_id=auth_request_id,
                 worker_id=self.worker_id,
                 receive_count=receive_count,
+                payment_token_client=self.payment_token_client,
             )
 
             # Track successful processing
@@ -119,6 +126,7 @@ class WorkerTestInstance:
             aws_region=settings.aws_region,
             aws_endpoint_url=settings.aws_endpoint_url,
             message_handler=self._handle_message,
+            sqs_client=self.sqs_client,  # Inject the test client
         )
 
         # Start consumer in background task
@@ -247,7 +255,7 @@ class WorkerTestInstance:
 
 
 @pytest_asyncio.fixture
-async def worker_instance(test_sqs_queue):
+async def worker_instance(test_sqs_queue, sqs_client, mock_payment_token_client):
     """
     Create a single worker instance for testing.
 
@@ -265,7 +273,11 @@ async def worker_instance(test_sqs_queue):
     Returns:
         WorkerTestInstance: Managed worker instance
     """
-    worker = WorkerTestInstance(queue_url=test_sqs_queue)
+    worker = WorkerTestInstance(
+        queue_url=test_sqs_queue,
+        sqs_client=sqs_client,
+        payment_token_client=mock_payment_token_client,
+    )
 
     yield worker
 
@@ -275,7 +287,7 @@ async def worker_instance(test_sqs_queue):
 
 
 @pytest_asyncio.fixture
-async def multiple_workers(test_sqs_queue):
+async def multiple_workers(test_sqs_queue, sqs_client, mock_payment_token_client):
     """
     Factory fixture for creating multiple worker instances.
 
@@ -309,6 +321,8 @@ async def multiple_workers(test_sqs_queue):
             worker = WorkerTestInstance(
                 queue_url=test_sqs_queue,
                 worker_id=f"test-worker-{i}",
+                sqs_client=sqs_client,
+                payment_token_client=mock_payment_token_client,
             )
             workers.append(worker)
             created_workers.append(worker)

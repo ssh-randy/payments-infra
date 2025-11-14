@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  # PostgreSQL - Integration test database
+  postgres-integration:
+    image: postgres:15-alpine
+    container_name: payment-token-integration-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: postgres  # Default database
+    ports:
+      - "5433:5432"  # Port expected by conftest.py
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
+    tmpfs:
+      - /var/lib/postgresql/data  # Use tmpfs for faster tests
+
+  # LocalStack - AWS services emulation (KMS, SQS)
+  localstack-integration:
+    image: localstack/localstack:latest
+    container_name: payment-token-integration-localstack
+    ports:
+      - "4566:4566"  # Standard LocalStack port
+    environment:
+      SERVICES: kms,sqs,secretsmanager
+      DEBUG: 0
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_DEFAULT_REGION: us-east-1
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+networks:
+  default:
+    name: payment-token-integration-network

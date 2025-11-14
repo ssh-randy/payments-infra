@@ -7,22 +7,43 @@ import "payments/v1/common.proto";
 // Payment Token Service API messages
 // Handles tokenization of payment data from POS devices
 
+// Encryption metadata for API partner key flow
+// Used when payment data is encrypted with API partner keys (online ordering)
+// instead of BDK-based device encryption (POS terminals)
+message EncryptionMetadata {
+  // Key ID used for encryption (e.g., "primary", "demo-primary-key-001", "ak_{uuid}")
+  string key_id = 1;
+
+  // Encryption algorithm (e.g., "AES-256-GCM")
+  string algorithm = 2;
+
+  // Base64-encoded initialization vector (IV/nonce)
+  string iv = 3;
+}
+
 // Request to create a payment token from encrypted payment data
 message CreatePaymentTokenRequest {
   // UUID of the restaurant/merchant
   string restaurant_id = 1;
 
-  // Payment data encrypted by POS device with derived key
+  // Payment data encrypted by POS device with derived key (BDK flow)
+  // OR encrypted with API partner key (online ordering flow)
   bytes encrypted_payment_data = 2;
 
-  // Device identifier for key derivation
-  string device_token = 3;
+  // Device identifier for key derivation (BDK flow only)
+  // Optional: only required when using BDK-based encryption
+  optional string device_token = 3;
 
   // Client-provided idempotency key
   string idempotency_key = 4;
 
   // Optional metadata (e.g., card brand, last4 digits)
   map<string, string> metadata = 5;
+
+  // Encryption metadata (API partner key flow only)
+  // Optional: only provided when using API partner keys
+  // If not provided, system assumes BDK-based device encryption
+  optional EncryptionMetadata encryption_metadata = 6;
 }
 
 // Response after creating a payment token

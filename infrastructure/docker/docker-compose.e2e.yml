@@ -40,13 +40,12 @@ services:
   # LocalStack - AWS services emulation (SQS, KMS)
   localstack:
     image: localstack/localstack:latest
-    container_name: payments-localstack
+    container_name: payments-localstack-e2e
     ports:
-      - "4567:4566"  # Different port to avoid conflicts
+      - "4567:4566"  # Different port to avoid conflicts with dev environment
     environment:
       SERVICES: sqs,kms,secretsmanager
       DEBUG: 1
-      DATA_DIR: /tmp/localstack/data
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
       interval: 5s

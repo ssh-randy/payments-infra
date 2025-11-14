@@ -54,6 +54,7 @@ async def process_auth_request(
     auth_request_id: uuid.UUID,
     worker_id: str,
     receive_count: int,
+    payment_token_client: PaymentTokenServiceClient | None = None,
 ) -> str:
     """
     Process an authorization request - main orchestration function.
@@ -72,6 +73,7 @@ async def process_auth_request(
         auth_request_id: Authorization request ID
         worker_id: Unique worker identifier
         receive_count: Number of times this message has been received (for retry logic)
+        payment_token_client: Optional injected PaymentTokenServiceClient (for testing)
 
     Returns:
         Processing result status (SUCCESS, SKIPPED_*, TERMINAL_FAILURE, RETRYABLE_FAILURE)
@@ -187,6 +189,7 @@ async def process_auth_request(
             payment_data = await _decrypt_payment_token(
                 payment_token=auth_details["payment_token"],
                 restaurant_id=str(auth_details["restaurant_id"]),
+                client=payment_token_client,
             )
         except (TokenNotFound, TokenExpired, Forbidden) as e:
             # Terminal errors - cannot recover
@@ -465,9 +468,15 @@ def _create_denied_event(
 async def _decrypt_payment_token(
     payment_token: str,
     restaurant_id: str,
+    client: PaymentTokenServiceClient | None = None,
 ) -> PaymentData:
     """
     Decrypt payment token using Payment Token Service.
+
+    Args:
+        payment_token: Payment token to decrypt
+        restaurant_id: Restaurant ID for authorization
+        client: Optional injected client (for testing). If None, creates a new client.
 
     Returns:
         PaymentData with decrypted card information
@@ -478,11 +487,14 @@ async def _decrypt_payment_token(
         Forbidden: Unauthorized access (terminal error)
         ProcessorTimeout: Service unavailable (retryable error)
     """
-    client = PaymentTokenServiceClient(
-        base_url=settings.payment_token_service.base_url,
-        service_auth_token=settings.payment_token_service.service_auth_token,
-        timeout_seconds=settings.payment_token_service.timeout_seconds,
-    )
+    # Use injected client if provided, otherwise create new one
+    client_provided = client is not None
+    if not client_provided:
+        client = PaymentTokenServiceClient(
+            base_url=settings.payment_token_service.base_url,
+            service_auth_token=settings.payment_token_service.service_auth_token,
+            timeout_seconds=settings.payment_token_service.timeout_seconds,
+        )
 
     try:
         payment_data_proto = await client.decrypt(
@@ -501,7 +513,9 @@ async def _decrypt_payment_token(
             cardholder_name=payment_data_proto.cardholder_name,
         )
     finally:
-        await client.close()
+        # Only close if we created the client ourselves
+        if not client_provided:
+            await client.close()
 
 
 async def _record_terminal_failure(

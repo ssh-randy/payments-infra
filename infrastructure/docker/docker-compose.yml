@@ -47,11 +47,6 @@ services:
     environment:
       SERVICES: sqs,kms,secretsmanager
       DEBUG: 1
-      DATA_DIR: /tmp/localstack/data
-      DOCKER_HOST: unix:///var/run/docker.sock
-    volumes:
-      - localstack_data:/tmp/localstack
-      - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
       interval: 10s
@@ -145,7 +140,6 @@ services:
 volumes:
   postgres_data:
   postgres_tokens_data:
-  localstack_data:
 
 networks:
   default:

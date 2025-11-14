@@ -244,7 +244,8 @@ class PaymentToken:
         restaurant_id: UUID of restaurant/merchant that owns this token
         encrypted_payment_data: Payment data encrypted with service key
         encryption_key_version: Version of encryption key used
-        device_token: Original device identifier (for audit)
+        device_token: Original device identifier (for audit, BDK flow only)
+        encryption_key_id: Key ID used for encryption (API partner key flow)
         created_at: When token was created
         expires_at: When token expires
         metadata: Non-sensitive display metadata
@@ -254,9 +255,10 @@ class PaymentToken:
     restaurant_id: str
     encrypted_payment_data: bytes
     encryption_key_version: str
-    device_token: str
+    device_token: Optional[str]
     created_at: datetime
     expires_at: datetime
+    encryption_key_id: Optional[str] = None
     metadata: TokenMetadata = field(default_factory=TokenMetadata)
 
     def __post_init__(self):
@@ -273,8 +275,11 @@ class PaymentToken:
         if not self.encryption_key_version:
             raise ValueError("encryption_key_version cannot be empty")
 
-        if not self.device_token:
-            raise ValueError("device_token cannot be empty")
+        # Either device_token (BDK flow) or encryption_key_id (API partner flow) must be present
+        if not self.device_token and not self.encryption_key_id:
+            raise ValueError(
+                "Either device_token (BDK flow) or encryption_key_id (API partner flow) must be provided"
+            )
 
         if self.expires_at <= self.created_at:
             raise ValueError("expires_at must be after created_at")
@@ -332,7 +337,8 @@ class PaymentToken:
         restaurant_id: str,
         encrypted_payment_data: bytes,
         encryption_key_version: str,
-        device_token: str,
+        device_token: Optional[str] = None,
+        encryption_key_id: Optional[str] = None,
         metadata: Optional[TokenMetadata] = None,
         expiration_hours: int = 24,
     ) -> "PaymentToken":
@@ -341,11 +347,16 @@ class PaymentToken:
         This is a factory method that generates a new token ID and sets
         appropriate timestamps.
 
+        Supports both encryption flows:
+        - BDK flow: Provide device_token (traditional POS terminal flow)
+        - API partner flow: Provide encryption_key_id (online ordering flow)
+
         Args:
             restaurant_id: UUID of restaurant/merchant
             encrypted_payment_data: Payment data encrypted with service key
             encryption_key_version: Version of encryption key used
-            device_token: Device identifier
+            device_token: Device identifier (BDK flow only)
+            encryption_key_id: Key ID used for encryption (API partner flow only)
             metadata: Optional non-sensitive metadata
             expiration_hours: Hours until token expires (default 24)
 
@@ -361,6 +372,7 @@ class PaymentToken:
             encrypted_payment_data=encrypted_payment_data,
             encryption_key_version=encryption_key_version,
             device_token=device_token,
+            encryption_key_id=encryption_key_id,
             created_at=now,
             expires_at=expires_at,
             metadata=metadata or TokenMetadata(),

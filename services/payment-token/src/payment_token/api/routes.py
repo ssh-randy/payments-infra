@@ -21,7 +21,12 @@ from payment_token.api.dependencies import (
     TokenSvc,
 )
 from payment_token.config import settings
-from payment_token.domain.encryption import DecryptionError, EncryptedData, EncryptionError
+from payment_token.domain.encryption import (
+    DecryptionError,
+    EncryptedData,
+    EncryptionError,
+    EncryptionMetadata,
+)
 from payment_token.domain.token import TokenError, TokenExpiredError, TokenOwnershipError
 from payment_token.infrastructure.kms import KMSError
 
@@ -111,16 +116,29 @@ async def create_payment_token(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="encrypted_payment_data is required",
             )
-        if not pb_request.device_token:
+
+        # Determine which encryption flow to use based on presence of encryption_metadata
+        has_encryption_metadata = pb_request.HasField("encryption_metadata")
+        has_device_token = pb_request.HasField("device_token")
+
+        # Validate that either encryption_metadata (API partner) or device_token (BDK) is provided
+        if not has_encryption_metadata and not has_device_token:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="device_token is required",
+                detail="Either device_token (BDK flow) or encryption_metadata (API partner flow) is required",
             )
 
-        logger.info(
-            f"Processing token creation for restaurant {pb_request.restaurant_id}, "
-            f"device {pb_request.device_token[:8]}..."
-        )
+        # Log which flow is being used
+        if has_encryption_metadata:
+            logger.info(
+                f"Processing token creation for restaurant {pb_request.restaurant_id} "
+                f"using API partner key: {pb_request.encryption_metadata.key_id}"
+            )
+        else:
+            logger.info(
+                f"Processing token creation for restaurant {pb_request.restaurant_id}, "
+                f"device {pb_request.device_token[:8]}..."
+            )
 
         # Check idempotency key (B1: Idempotency)
         is_idempotent = False
@@ -164,55 +182,92 @@ async def create_payment_token(
                     status_code=status.HTTP_200_OK,
                 )
 
-        # Retrieve BDK from KMS (B2: Device-based decryption)
+        # Route to appropriate encryption flow
         try:
-            logger.debug("Retrieving BDK from KMS")
-            bdk = kms_client.get_bdk(
-                encryption_context={
-                    "service": "payment-token",
-                    "purpose": "device-key-derivation",
-                }
-            )
-        except KMSError as e:
-            logger.error(f"Failed to retrieve BDK from KMS: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Encryption service unavailable",
-            )
+            if has_encryption_metadata:
+                # API Partner Key Flow (online ordering)
+                logger.debug("Using API partner key encryption flow")
 
-        # Deserialize encrypted data from device (format: nonce + ciphertext)
-        # Device encryption includes 12-byte nonce followed by ciphertext
-        device_data = pb_request.encrypted_payment_data
-        if len(device_data) < 12:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid encrypted payment data: too short",
-            )
+                # Parse encryption metadata from protobuf
+                encryption_metadata = EncryptionMetadata.from_protobuf(
+                    pb_request.encryption_metadata
+                )
 
-        encrypted_data_from_device = EncryptedData(
-            nonce=device_data[:12],  # First 12 bytes are nonce
-            ciphertext=device_data[12:],  # Rest is ciphertext
-        )
+                # Create token using API partner key flow
+                token = token_service.create_token_from_api_partner_encrypted_data(
+                    restaurant_id=pb_request.restaurant_id,
+                    encrypted_payment_data=pb_request.encrypted_payment_data,
+                    encryption_metadata=encryption_metadata,
+                    service_encryption_key=service_key,
+                    service_key_version=settings.current_key_version,
+                    metadata_dict=(
+                        dict(pb_request.metadata) if pb_request.metadata else None
+                    ),
+                    expiration_hours=settings.default_token_ttl_hours,
+                )
 
-        # Create token using domain service (B2 + B3)
-        try:
-            token = token_service.create_token_from_device_encrypted_data(
-                restaurant_id=pb_request.restaurant_id,
-                encrypted_payment_data_from_device=encrypted_data_from_device,
-                device_token=pb_request.device_token,
-                bdk=bdk,
-                service_encryption_key=service_key,
-                service_key_version=settings.current_key_version,
-                metadata_dict=dict(pb_request.metadata) if pb_request.metadata else None,
-                expiration_hours=settings.default_token_ttl_hours,
-            )
+            else:
+                # BDK Flow (POS terminals) - Original implementation
+                logger.debug("Using BDK device-based encryption flow")
+
+                # Retrieve BDK from KMS (B2: Device-based decryption)
+                try:
+                    logger.debug("Retrieving BDK from KMS")
+                    bdk = kms_client.get_bdk(
+                        encryption_context={
+                            "service": "payment-token",
+                            "purpose": "device-key-derivation",
+                        }
+                    )
+                except KMSError as e:
+                    logger.error(f"Failed to retrieve BDK from KMS: {str(e)}")
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail="Encryption service unavailable",
+                    )
+
+                # Deserialize encrypted data from device (format: nonce + ciphertext)
+                # Device encryption includes 12-byte nonce followed by ciphertext
+                device_data = pb_request.encrypted_payment_data
+                if len(device_data) < 12:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Invalid encrypted payment data: too short",
+                    )
+
+                encrypted_data_from_device = EncryptedData(
+                    nonce=device_data[:12],  # First 12 bytes are nonce
+                    ciphertext=device_data[12:],  # Rest is ciphertext
+                )
+
+                # Create token using domain service (B2 + B3)
+                token = token_service.create_token_from_device_encrypted_data(
+                    restaurant_id=pb_request.restaurant_id,
+                    encrypted_payment_data_from_device=encrypted_data_from_device,
+                    device_token=pb_request.device_token,
+                    bdk=bdk,
+                    service_encryption_key=service_key,
+                    service_key_version=settings.current_key_version,
+                    metadata_dict=(
+                        dict(pb_request.metadata) if pb_request.metadata else None
+                    ),
+                    expiration_hours=settings.default_token_ttl_hours,
+                )
+
         except DecryptionError as e:
-            logger.warning(f"Device decryption failed: {str(e)}")
+            logger.warning(f"Decryption failed: {str(e)}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Failed to decrypt payment data. Invalid device_token or corrupted data.",
+                detail="Failed to decrypt payment data. Invalid key or corrupted data.",
             )
-        except (EncryptionError, ValueError, TokenError) as e:
+        except ValueError as e:
+            # ValueError can be from validation (algorithm, key_id, IV) - return 400
+            logger.warning(f"Validation failed: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(e),
+            )
+        except (EncryptionError, TokenError) as e:
             logger.error(f"Token creation failed: {str(e)}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

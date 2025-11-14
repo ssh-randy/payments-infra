@@ -1,12 +1,24 @@
 """Unit tests for SQS consumer."""
 
 import asyncio
+import base64
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from payments_proto.payments.v1 import events_pb2
 
 from auth_processor_worker.infrastructure.sqs_consumer import SQSConsumer
+
+
+def create_protobuf_message(auth_request_id: str, restaurant_id: str = "rest-123", created_at: int = 1234567890) -> str:
+    """Create a base64-encoded protobuf message for testing."""
+    msg = events_pb2.AuthRequestQueuedMessage(
+        auth_request_id=auth_request_id,
+        restaurant_id=restaurant_id,
+        created_at=created_at,
+    )
+    return base64.b64encode(msg.SerializeToString()).decode('utf-8')
 
 
 @pytest.fixture
@@ -66,13 +78,13 @@ async def test_process_messages_with_valid_message(mock_sqs_client):
         message_handler=test_handler,
     )
 
-    # Mock SQS response with a valid message
+    # Mock SQS response with a valid message (base64-encoded protobuf)
     mock_sqs_client.receive_message.return_value = {
         "Messages": [
             {
                 "MessageId": "msg-123",
                 "ReceiptHandle": "receipt-handle-123",
-                "Body": json.dumps({"auth_request_id": "auth-req-456"}),
+                "Body": create_protobuf_message("auth-req-456", "rest-123"),
                 "Attributes": {
                     "ApproximateReceiveCount": "1",
                     "MessageGroupId": "group-1",
@@ -182,13 +194,13 @@ async def test_process_messages_with_handler_exception(mock_sqs_client):
         message_handler=failing_handler,
     )
 
-    # Mock SQS response with valid message
+    # Mock SQS response with valid message (base64-encoded protobuf)
     mock_sqs_client.receive_message.return_value = {
         "Messages": [
             {
                 "MessageId": "msg-123",
                 "ReceiptHandle": "receipt-handle-123",
-                "Body": json.dumps({"auth_request_id": "auth-req-456"}),
+                "Body": create_protobuf_message("auth-req-456", "rest-123"),
                 "Attributes": {"ApproximateReceiveCount": "2"},
             }
         ]
@@ -264,25 +276,25 @@ async def test_process_messages_with_multiple_messages(mock_sqs_client):
         message_handler=test_handler,
     )
 
-    # Mock SQS response with multiple messages
+    # Mock SQS response with multiple messages (base64-encoded protobuf)
     mock_sqs_client.receive_message.return_value = {
         "Messages": [
             {
                 "MessageId": "msg-1",
                 "ReceiptHandle": "receipt-1",
-                "Body": json.dumps({"auth_request_id": "auth-1"}),
+                "Body": create_protobuf_message("auth-1", "rest-1"),
                 "Attributes": {"ApproximateReceiveCount": "1"},
             },
             {
                 "MessageId": "msg-2",
                 "ReceiptHandle": "receipt-2",
-                "Body": json.dumps({"auth_request_id": "auth-2"}),
+                "Body": create_protobuf_message("auth-2", "rest-2"),
                 "Attributes": {"ApproximateReceiveCount": "1"},
             },
             {
                 "MessageId": "msg-3",
                 "ReceiptHandle": "receipt-3",
-                "Body": json.dumps({"auth_request_id": "auth-3"}),
+                "Body": create_protobuf_message("auth-3", "rest-3"),
                 "Attributes": {"ApproximateReceiveCount": "1"},
             },
         ]

@@ -36,6 +36,7 @@ class SQSConsumer:
         aws_region: str = "us-east-1",
         aws_endpoint_url: str | None = None,
         message_handler: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+        sqs_client: Any = None,
     ) -> None:
         """
         Initialize the SQS consumer.
@@ -48,6 +49,8 @@ class SQSConsumer:
             aws_region: AWS region (default: us-east-1)
             aws_endpoint_url: AWS endpoint URL (for LocalStack)
             message_handler: Async callback to process messages
+            sqs_client: Pre-configured SQS client (for testing). If provided, the consumer
+                        will use this client instead of creating its own session.
         """
         self.queue_url = queue_url
         self.batch_size = batch_size
@@ -59,6 +62,7 @@ class SQSConsumer:
         self.running = False
         self._session: aioboto3.Session | None = None
         self._sqs_client: Any = None
+        self._injected_client: Any = sqs_client  # Store injected client for tests
         self.logger = get_logger(self.__class__.__name__)
 
     async def start(self) -> None:
@@ -66,7 +70,7 @@ class SQSConsumer:
         Start the consumer and begin polling for messages.
 
         This method:
-        1. Initializes the SQS client
+        1. Initializes the SQS client (or uses injected one for tests)
         2. Enters a long-polling loop
         3. Processes messages via the message handler
         4. Continues until stop() is called
@@ -80,15 +84,10 @@ class SQSConsumer:
             visibility_timeout=self.visibility_timeout,
         )
 
-        # Initialize boto3 session and SQS client
-        self._session = aioboto3.Session()
-        async with self._session.client(
-            "sqs",
-            region_name=self.aws_region,
-            endpoint_url=self.aws_endpoint_url,
-        ) as sqs_client:
-            self._sqs_client = sqs_client
-
+        # Use injected client if provided (for tests), otherwise create our own
+        if self._injected_client:
+            # Test mode: use provided client
+            self._sqs_client = self._injected_client
             try:
                 await self._polling_loop()
             except Exception as e:
@@ -96,6 +95,23 @@ class SQSConsumer:
                 raise
             finally:
                 self.logger.info("sqs_consumer_stopped")
+        else:
+            # Production mode: create and manage our own session
+            self._session = aioboto3.Session()
+            async with self._session.client(
+                "sqs",
+                region_name=self.aws_region,
+                endpoint_url=self.aws_endpoint_url,
+            ) as sqs_client:
+                self._sqs_client = sqs_client
+
+                try:
+                    await self._polling_loop()
+                except Exception as e:
+                    self.logger.error("sqs_consumer_error", error=str(e), exc_info=True)
+                    raise
+                finally:
+                    self.logger.info("sqs_consumer_stopped")
 
     async def stop(self) -> None:
         """

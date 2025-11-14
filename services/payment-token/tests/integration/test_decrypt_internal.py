@@ -10,7 +10,7 @@ These tests verify the complete decrypt flow including:
 
 import sys
 from datetime import datetime, timedelta
-from unittest.mock import patch
+from unittest.mock import Mock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -32,8 +32,8 @@ from payment_token.infrastructure.models import (
 
 
 @pytest.fixture
-def client(db_session):
-    """Create a test client with database dependency override."""
+def client(db_session, service_key, monkeypatch):
+    """Create a test client with database and KMS dependency overrides."""
 
     def override_get_db():
         try:
@@ -41,9 +41,21 @@ def client(db_session):
         finally:
             pass
 
+    # Override KMS client to use test key (monkeypatch module function)
+    def override_get_kms_client():
+        mock_kms = Mock()
+        mock_kms.get_service_encryption_key.return_value = service_key
+        return mock_kms
+
+    # Monkeypatch the get_kms_client function in internal_routes module
+    from payment_token.api import internal_routes
+
+    monkeypatch.setattr(internal_routes, "get_kms_client", override_get_kms_client)
     app.dependency_overrides[get_db] = override_get_db
+
     with TestClient(app) as test_client:
         yield test_client
+
     app.dependency_overrides.clear()
 
 
@@ -96,15 +108,10 @@ def encrypted_token(db_session, service_key, sample_payment_data, test_restauran
 class TestDecryptEndpoint:
     """Test suite for POST /internal/v1/decrypt endpoint."""
 
-    @patch("payment_token.api.internal_routes.get_kms_client")
     def test_successful_decryption(
-        self, mock_get_kms, client, db_session, encrypted_token, service_key, test_restaurant_id
+        self, client, db_session, encrypted_token, service_key, test_restaurant_id
     ):
         """Test successful token decryption with all validations."""
-        # Mock KMS client to return our test key
-        mock_kms = mock_get_kms.return_value
-        mock_kms.get_service_encryption_key.return_value = service_key
-
         # Create protobuf request
         request = payment_token_pb2.DecryptPaymentTokenRequest()
         request.payment_token = "pt_test_123"
@@ -200,8 +207,7 @@ class TestDecryptEndpoint:
 
         assert response.status_code == 403
 
-    @patch("payment_token.api.internal_routes.get_kms_client")
-    def test_token_not_found(self, mock_get_kms, client, db_session, test_restaurant_id):
+    def test_token_not_found(self, client, db_session, test_restaurant_id):
         """Test that non-existent token returns 404."""
         request = payment_token_pb2.DecryptPaymentTokenRequest()
         request.payment_token = "pt_nonexistent"
@@ -228,9 +234,8 @@ class TestDecryptEndpoint:
         assert audit_entry.success is False
         assert audit_entry.error_code == "token_not_found"
 
-    @patch("payment_token.api.internal_routes.get_kms_client")
     def test_restaurant_mismatch(
-        self, mock_get_kms, client, db_session, encrypted_token
+        self, client, db_session, encrypted_token
     ):
         """Test that restaurant ID mismatch returns 403."""
         request = payment_token_pb2.DecryptPaymentTokenRequest()
@@ -258,8 +263,7 @@ class TestDecryptEndpoint:
         assert audit_entry.success is False
         assert audit_entry.error_code == "restaurant_mismatch"
 
-    @patch("payment_token.api.internal_routes.get_kms_client")
-    def test_expired_token(self, mock_get_kms, client, db_session, service_key, test_restaurant_id):
+    def test_expired_token(self, client, db_session, service_key, test_restaurant_id):
         """Test that expired token returns 410."""
         # Create an expired token
         payment_data = PaymentData(

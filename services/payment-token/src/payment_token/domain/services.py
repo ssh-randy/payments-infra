@@ -12,7 +12,9 @@ from payment_token.domain.encryption import (
     DecryptionError,
     EncryptedData,
     EncryptionError,
+    EncryptionMetadata,
     decrypt_payment_data,
+    decrypt_with_encryption_metadata,
     decrypt_with_key,
     encrypt_with_key,
 )
@@ -141,6 +143,119 @@ class TokenService:
 
         except DecryptionError as e:
             logger.error(f"Device decryption failed: {str(e)}")
+            raise
+        except EncryptionError as e:
+            logger.error(f"Service encryption failed: {str(e)}")
+            raise
+        except ValueError as e:
+            logger.error(f"Payment data validation failed: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error creating token: {str(e)}")
+            raise TokenError(f"Failed to create token: {str(e)}") from e
+
+    def create_token_from_api_partner_encrypted_data(
+        self,
+        restaurant_id: str,
+        encrypted_payment_data: bytes,
+        encryption_metadata: EncryptionMetadata,
+        service_encryption_key: bytes,
+        service_key_version: str,
+        metadata_dict: Optional[dict] = None,
+        expiration_hours: int = 24,
+    ) -> PaymentToken:
+        """Create a payment token from API partner encrypted data.
+
+        This implements the API partner key encryption flow (online ordering):
+        1. Decrypt data using encryption_metadata (key_id lookup)
+        2. Parse decrypted bytes into PaymentData domain object
+        3. Extract metadata from payment data
+        4. Re-encrypt with service rotating key
+        5. Create PaymentToken entity
+
+        This is distinct from device-based encryption (BDK flow) and allows
+        multiple API partners to have their own encryption keys.
+
+        Args:
+            restaurant_id: UUID of restaurant/merchant
+            encrypted_payment_data: Payment data encrypted with API partner key
+            encryption_metadata: Metadata containing key_id, algorithm, and IV
+            service_encryption_key: Current service encryption key
+            service_key_version: Version of service encryption key
+            metadata_dict: Optional metadata from client (merged with extracted)
+            expiration_hours: Hours until token expires (default 24)
+
+        Returns:
+            PaymentToken entity ready for persistence
+
+        Raises:
+            DecryptionError: If decryption with API partner key fails
+            EncryptionError: If re-encryption or key retrieval fails
+            ValueError: If payment data or encryption metadata is invalid
+            TokenError: If token creation fails
+        """
+        logger.info(
+            f"Creating token for restaurant {restaurant_id} using API partner key {encryption_metadata.key_id}"
+        )
+
+        try:
+            # Step 1: Decrypt using API partner key (via encryption_metadata)
+            decrypted_bytes = decrypt_with_encryption_metadata(
+                encrypted_payment_data, encryption_metadata
+            )
+            logger.debug("API partner key decryption successful")
+
+            # Step 2: Parse decrypted bytes into PaymentData domain object
+            payment_data = PaymentData.from_bytes(decrypted_bytes)
+            logger.debug("Payment data parsed successfully")
+
+            # Step 3: Extract metadata from payment data
+            extracted_metadata = TokenMetadata.from_payment_data(payment_data)
+
+            # Merge with client-provided metadata (client metadata takes precedence)
+            if metadata_dict:
+                metadata = TokenMetadata(
+                    card_brand=metadata_dict.get("card_brand")
+                    or extracted_metadata.card_brand,
+                    last4=metadata_dict.get("last4") or extracted_metadata.last4,
+                    exp_month=metadata_dict.get("exp_month")
+                    or extracted_metadata.exp_month,
+                    exp_year=metadata_dict.get("exp_year")
+                    or extracted_metadata.exp_year,
+                )
+            else:
+                metadata = extracted_metadata
+
+            logger.debug(f"Metadata extracted: {metadata.to_dict()}")
+
+            # Step 4: Re-encrypt with service rotating key
+            payment_data_bytes = payment_data.to_bytes()
+            encrypted_with_service_key = encrypt_with_key(
+                payment_data_bytes, service_encryption_key
+            )
+
+            # Serialize encrypted data (ciphertext + nonce)
+            encrypted_payment_data_final = self._serialize_encrypted_data(
+                encrypted_with_service_key
+            )
+            logger.debug("Re-encryption with service key successful")
+
+            # Step 5: Create PaymentToken entity
+            token = PaymentToken.create(
+                restaurant_id=restaurant_id,
+                encrypted_payment_data=encrypted_payment_data_final,
+                encryption_key_version=service_key_version,
+                device_token=None,  # No device token in API partner flow
+                encryption_key_id=encryption_metadata.key_id,  # Store key_id for audit
+                metadata=metadata,
+                expiration_hours=expiration_hours,
+            )
+
+            logger.info(f"Token created successfully: {token.payment_token}")
+            return token
+
+        except DecryptionError as e:
+            logger.error(f"API partner key decryption failed: {str(e)}")
             raise
         except EncryptionError as e:
             logger.error(f"Service encryption failed: {str(e)}")

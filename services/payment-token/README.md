@@ -95,8 +95,27 @@ poetry install
 
 ### Run Tests
 
+**Quick Start (recommended):**
 ```bash
-poetry run pytest
+make test              # Run all tests (starts infrastructure automatically)
+make test-unit         # Run unit tests only (fast, no infrastructure)
+make test-integration  # Run integration tests only (with infrastructure)
+```
+
+**Manual:**
+```bash
+# Unit tests (no infrastructure needed)
+poetry run pytest tests/unit -v
+
+# Integration tests (requires PostgreSQL + LocalStack)
+docker-compose -f docker-compose.integration.yml up -d
+poetry run pytest tests/integration -v
+docker-compose -f docker-compose.integration.yml down
+```
+
+**View all available commands:**
+```bash
+make help
 ```
 
 ### Type Checking

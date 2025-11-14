@@ -16,7 +16,7 @@ _shared_proto_path = Path(__file__).parent.parent.parent.parent.parent.parent / 
 if str(_shared_proto_path) not in sys.path:
     sys.path.insert(0, str(_shared_proto_path))
 
-from payments_proto.payments.v1 import payment_token_pb2
+from payments_proto.payments.v1 import common_pb2, payment_token_pb2
 
 from auth_processor_worker.models.exceptions import (
     Forbidden,
@@ -44,6 +44,7 @@ class MockPaymentTokenServiceClient:
         self.token_responses: dict[str, Any] = {}
         self.default_response: payment_token_pb2.PaymentData | None = None
         self.default_error: Exception | None = None
+        self.custom_decrypt_handler: Any = None  # For dynamic behavior
 
     def configure_token_response(
         self,
@@ -69,14 +70,16 @@ class MockPaymentTokenServiceClient:
         """
         payment_data = payment_token_pb2.PaymentData(
             card_number=card_number,
-            exp_month=exp_month,
-            exp_year=exp_year,
+            exp_month=f"{exp_month:02d}",  # Format as MM (e.g., "01", "12")
+            exp_year=str(exp_year),  # Format as YYYY (e.g., "2025")
             cvv=cvv,
             cardholder_name=cardholder_name,
         )
 
         if billing_zip:
-            payment_data.billing_zip = billing_zip
+            payment_data.billing_address.CopyFrom(
+                common_pb2.Address(postal_code=billing_zip)
+            )
 
         self.token_responses[payment_token] = payment_data
 
@@ -112,14 +115,16 @@ class MockPaymentTokenServiceClient:
         """
         payment_data = payment_token_pb2.PaymentData(
             card_number=card_number,
-            exp_month=exp_month,
-            exp_year=exp_year,
+            exp_month=f"{exp_month:02d}",  # Format as MM (e.g., "01", "12")
+            exp_year=str(exp_year),  # Format as YYYY (e.g., "2025")
             cvv=cvv,
             cardholder_name=cardholder_name,
         )
 
         if billing_zip:
-            payment_data.billing_zip = billing_zip
+            payment_data.billing_address.CopyFrom(
+                common_pb2.Address(postal_code=billing_zip)
+            )
 
         self.default_response = payment_data
 
@@ -152,6 +157,10 @@ class MockPaymentTokenServiceClient:
         Raises:
             TokenNotFound, TokenExpired, Forbidden, ProcessorTimeout based on configuration
         """
+        # If custom handler is configured, use it (for dynamic behavior)
+        if self.custom_decrypt_handler:
+            return await self.custom_decrypt_handler(payment_token, restaurant_id, requesting_service)
+
         # Check for token-specific configuration
         if payment_token in self.token_responses:
             response = self.token_responses[payment_token]
@@ -172,14 +181,17 @@ class MockPaymentTokenServiceClient:
             raise self.default_error
 
         # Fall back to generic success response
-        return payment_token_pb2.PaymentData(
+        payment_data = payment_token_pb2.PaymentData(
             card_number="4242424242424242",
-            exp_month=12,
-            exp_year=2025,
+            exp_month="12",  # Format as MM string
+            exp_year="2025",  # Format as YYYY string
             cvv="123",
             cardholder_name="Test Cardholder",
-            billing_zip="12345",
         )
+        payment_data.billing_address.CopyFrom(
+            common_pb2.Address(postal_code="12345")
+        )
+        return payment_data
 
     async def close(self) -> None:
         """Mock close method (no-op)."""
@@ -195,15 +207,12 @@ class MockPaymentTokenServiceClient:
 
 
 @pytest.fixture
-def mock_payment_token_client(monkeypatch):
+def mock_payment_token_client():
     """
-    Fixture that patches PaymentTokenServiceClient with a mock implementation.
+    Fixture that provides a mock Payment Token Service client.
 
-    This fixture:
-    1. Creates a MockPaymentTokenServiceClient instance
-    2. Patches the PaymentTokenServiceClient class to return the mock
-    3. Yields the mock for test configuration
-    4. Automatically reverts the patch after the test
+    This mock is injected via dependency injection into the worker,
+    avoiding brittle monkeypatching.
 
     Usage:
         def test_something(mock_payment_token_client):
@@ -219,14 +228,12 @@ def mock_payment_token_client(monkeypatch):
                 error=TokenExpired("Token expired"),
             )
 
-            # Run your test - the worker will use the mock
+            # The mock is automatically injected into worker via worker_instance fixture
             ...
 
     Returns:
         MockPaymentTokenServiceClient: The mock client instance
     """
-    from auth_processor_worker.clients import payment_token_client
-
     # Create mock instance
     mock_client = MockPaymentTokenServiceClient(
         base_url="http://mock:8000",
@@ -235,17 +242,6 @@ def mock_payment_token_client(monkeypatch):
 
     # Configure default success response
     mock_client.configure_default_response()
-
-    # Patch the PaymentTokenServiceClient class
-    # When code does: client = PaymentTokenServiceClient(...), it gets our mock
-    def mock_client_factory(*args, **kwargs):
-        return mock_client
-
-    monkeypatch.setattr(
-        payment_token_client,
-        "PaymentTokenServiceClient",
-        mock_client_factory,
-    )
 
     yield mock_client
 

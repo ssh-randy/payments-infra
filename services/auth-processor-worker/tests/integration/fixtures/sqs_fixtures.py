@@ -7,15 +7,25 @@ These fixtures provide:
 """
 
 import asyncio
+import base64
 import json
 import os
+import sys
 import uuid
+from pathlib import Path
 from typing import Any
 
 import aioboto3
 import pytest
 import pytest_asyncio
 from botocore.exceptions import ClientError
+
+# Add shared proto directory to Python path
+_shared_proto_path = Path(__file__).parent.parent.parent.parent.parent.parent / "shared" / "python"
+if str(_shared_proto_path) not in sys.path:
+    sys.path.insert(0, str(_shared_proto_path))
+
+from payments_proto.payments.v1 import events_pb2
 
 # Test queue configuration
 TEST_QUEUE_NAME = "auth-requests-test.fifo"
@@ -26,12 +36,12 @@ AWS_ENDPOINT_URL = os.getenv("AWS_ENDPOINT_URL", "http://localhost:4566")
 AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
 
 
-@pytest_asyncio.fixture(scope="session")
+@pytest_asyncio.fixture(scope="function")
 async def sqs_client():
     """
     Create an SQS client connected to LocalStack.
 
-    Scope: session - reuse the same client across all tests.
+    Scope: function - creates a fresh client for each test to avoid event loop conflicts.
     """
     session = aioboto3.Session()
     async with session.client(
@@ -115,7 +125,7 @@ async def publish_auth_request(sqs_client, test_sqs_queue):
         auth_request_id: uuid.UUID,
         message_group_id: str = "test-group",
         message_deduplication_id: str | None = None,
-        custom_body: dict[str, Any] | None = None,
+        restaurant_id: str | None = None,
     ) -> dict[str, str]:
         """
         Publish an auth request message to the test queue.
@@ -124,19 +134,24 @@ async def publish_auth_request(sqs_client, test_sqs_queue):
             auth_request_id: Authorization request ID
             message_group_id: FIFO message group ID (default: "test-group")
             message_deduplication_id: Optional deduplication ID (auto-generated if None)
-            custom_body: Optional custom message body (overrides default)
+            restaurant_id: Optional restaurant ID (defaults to test restaurant)
 
         Returns:
             dict: SQS response with MessageId
         """
-        # Default message body
-        if custom_body is None:
-            body = {
-                "auth_request_id": str(auth_request_id),
-                "timestamp": "2025-01-01T00:00:00Z",
-            }
-        else:
-            body = custom_body
+        # Create protobuf message
+        import time
+        queued_msg = events_pb2.AuthRequestQueuedMessage(
+            auth_request_id=str(auth_request_id),
+            restaurant_id=restaurant_id or "rest_test_12345",
+            created_at=int(time.time()),
+        )
+
+        # Serialize to bytes
+        message_bytes = queued_msg.SerializeToString()
+
+        # Base64 encode
+        message_body = base64.b64encode(message_bytes).decode('utf-8')
 
         # Auto-generate deduplication ID if not provided
         if message_deduplication_id is None:
@@ -144,7 +159,7 @@ async def publish_auth_request(sqs_client, test_sqs_queue):
 
         response = await sqs_client.send_message(
             QueueUrl=test_sqs_queue,
-            MessageBody=json.dumps(body),
+            MessageBody=message_body,
             MessageGroupId=message_group_id,
             MessageDeduplicationId=message_deduplication_id,
         )
