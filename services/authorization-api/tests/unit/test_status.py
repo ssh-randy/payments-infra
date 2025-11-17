@@ -5,7 +5,7 @@ from datetime import datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from payments.v1.authorization_pb2 import AuthStatus, GetAuthStatusResponse
+from payments_proto.payments.v1.authorization_pb2 import AuthStatus, GetAuthStatusResponse
 
 
 @pytest.mark.asyncio

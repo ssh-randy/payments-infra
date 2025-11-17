@@ -31,12 +31,12 @@ def _build_result_dict(record) -> dict:
         result["processor_name"] = record["processor_name"]
     if record.get("processor_auth_id"):
         result["processor_auth_id"] = record["processor_auth_id"]
-    if record.get("processor_auth_code"):
-        result["processor_auth_code"] = record["processor_auth_code"]
-    if record.get("processor_decline_code"):
-        result["processor_decline_code"] = record["processor_decline_code"]
-    if record.get("decline_reason"):
-        result["decline_reason"] = record["decline_reason"]
+    if record.get("authorization_code"):
+        result["processor_auth_code"] = record["authorization_code"]
+    if record.get("denial_code"):
+        result["processor_decline_code"] = record["denial_code"]
+    if record.get("denial_reason"):
+        result["decline_reason"] = record["denial_reason"]
     if record.get("network_status"):
         result["network_status"] = record["network_status"]
     if record.get("risk_score") is not None:

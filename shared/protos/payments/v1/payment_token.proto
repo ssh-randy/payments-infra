@@ -22,6 +22,9 @@ message EncryptionMetadata {
 }
 
 // Request to create a payment token from encrypted payment data
+// DEPRECATED: External endpoint POST /v1/payment-tokens now uses JSON only.
+// This protobuf message is kept for documentation and backwards compatibility.
+// Use JSON request format instead (see CreatePaymentTokenRequestJSON in Python code).
 message CreatePaymentTokenRequest {
   // UUID of the restaurant/merchant
   string restaurant_id = 1;
@@ -47,6 +50,9 @@ message CreatePaymentTokenRequest {
 }
 
 // Response after creating a payment token
+// DEPRECATED: External endpoint POST /v1/payment-tokens now returns JSON only.
+// This protobuf message is kept for documentation and backwards compatibility.
+// Use JSON response format instead (see CreatePaymentTokenResponseJSON in Python code).
 message CreatePaymentTokenResponse {
   // Generated token in format: pt_<uuid>
   string payment_token = 1;
@@ -62,6 +68,9 @@ message CreatePaymentTokenResponse {
 }
 
 // Request to retrieve payment token metadata (not the actual payment data)
+// DEPRECATED: External endpoint GET /v1/payment-tokens/{token_id} uses JSON only.
+// This protobuf message is kept for documentation and backwards compatibility.
+// Token ID and restaurant_id are passed via URL path and query parameters instead.
 message GetPaymentTokenRequest {
   // Payment token to retrieve
   string payment_token = 1;
@@ -71,6 +80,9 @@ message GetPaymentTokenRequest {
 }
 
 // Response with payment token metadata
+// DEPRECATED: External endpoint GET /v1/payment-tokens/{token_id} returns JSON only.
+// This protobuf message is kept for documentation and backwards compatibility.
+// Use JSON response format instead (see GetPaymentTokenResponseJSON in Python code).
 message GetPaymentTokenResponse {
   // Payment token
   string payment_token = 1;

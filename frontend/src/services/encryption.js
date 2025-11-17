@@ -52,19 +52,27 @@ async function deriveEncryptionKey(masterKey, keyId) {
 /**
  * Get encryption key for API Partner
  * In production, this would fetch from a secure key server
- * For demo, we derive from a hardcoded master key
+ * For demo, we use the same hardcoded key as the backend
  *
  * @param {string} keyId - API Partner Key ID
  * @returns {Promise<CryptoKey>} Encryption key
  */
 export async function getApiPartnerEncryptionKey(keyId) {
-  // DEMO IMPLEMENTATION: Use hardcoded primary key
+  // DEMO IMPLEMENTATION: Use hardcoded primary key (matches backend PRIMARY_ENCRYPTION_KEY)
   // Production: Fetch from secure key server
 
   if (keyId === 'demo-primary-key-001') {
-    // Derive from master key for demo
-    const mockMasterKey = 'demo-master-key-not-for-production';
-    return await deriveEncryptionKey(mockMasterKey, keyId);
+    // Use same hex key as backend for demo
+    const hexKey = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+    const keyBytes = new Uint8Array(hexKey.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
+
+    return await crypto.subtle.importKey(
+      'raw',
+      keyBytes,
+      { name: 'AES-GCM', length: 256 },
+      true,
+      ['encrypt']
+    );
   }
 
   throw new Error(`Unknown key_id: ${keyId}`);

@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime
 
 import pytest
-from payments.v1.authorization_pb2 import AuthStatus, GetAuthStatusResponse
+from payments_proto.payments.v1.authorization_pb2 import AuthStatus, GetAuthStatusResponse
 
 from authorization_api.api.routes.status import build_status_response
 from authorization_api.domain.read_models import create_auth_request_state

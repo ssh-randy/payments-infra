@@ -22,10 +22,9 @@ class TestInternalDecryptionAuthorization:
         response = create_token_helper()
         assert response.status_code == 201
 
-        # Parse response
-        pb_response = payment_token_pb2.CreatePaymentTokenResponse()
-        pb_response.ParseFromString(response.content)
-        token_id = pb_response.payment_token
+        # Parse JSON response
+        json_response = response.json()
+        token_id = json_response["payment_token"]
 
         # Decrypt with auth-processor-worker
         decrypt_request = payment_token_pb2.DecryptPaymentTokenRequest(
@@ -66,10 +65,9 @@ class TestInternalDecryptionAuthorization:
         response = create_token_helper()
         assert response.status_code == 201
 
-        # Parse response
-        pb_response = payment_token_pb2.CreatePaymentTokenResponse()
-        pb_response.ParseFromString(response.content)
-        token_id = pb_response.payment_token
+        # Parse JSON response
+        json_response = response.json()
+        token_id = json_response["payment_token"]
 
         # Decrypt with void-processor-worker
         decrypt_request = payment_token_pb2.DecryptPaymentTokenRequest(
@@ -99,10 +97,9 @@ class TestInternalDecryptionAuthorization:
         response = create_token_helper()
         assert response.status_code == 201
 
-        # Parse response
-        pb_response = payment_token_pb2.CreatePaymentTokenResponse()
-        pb_response.ParseFromString(response.content)
-        token_id = pb_response.payment_token
+        # Parse JSON response
+        json_response = response.json()
+        token_id = json_response["payment_token"]
 
         # Try to decrypt with unauthorized service
         decrypt_request = payment_token_pb2.DecryptPaymentTokenRequest(
@@ -132,10 +129,9 @@ class TestInternalDecryptionAuthorization:
         response = create_token_helper()
         assert response.status_code == 201
 
-        # Parse response
-        pb_response = payment_token_pb2.CreatePaymentTokenResponse()
-        pb_response.ParseFromString(response.content)
-        token_id = pb_response.payment_token
+        # Parse JSON response
+        json_response = response.json()
+        token_id = json_response["payment_token"]
 
         # Try to decrypt WITHOUT X-Service-Auth header
         decrypt_request = payment_token_pb2.DecryptPaymentTokenRequest(
@@ -165,10 +161,9 @@ class TestInternalDecryptionAuthorization:
         response = create_token_helper()
         assert response.status_code == 201
 
-        # Parse response
-        pb_response = payment_token_pb2.CreatePaymentTokenResponse()
-        pb_response.ParseFromString(response.content)
-        token_id = pb_response.payment_token
+        # Parse JSON response
+        json_response = response.json()
+        token_id = json_response["payment_token"]
 
         # Try to decrypt WITHOUT X-Request-ID header
         decrypt_request = payment_token_pb2.DecryptPaymentTokenRequest(
@@ -216,10 +211,9 @@ class TestAuditLoggingForDecryption:
         response = create_token_helper()
         assert response.status_code == 201
 
-        # Parse response
-        pb_response = payment_token_pb2.CreatePaymentTokenResponse()
-        pb_response.ParseFromString(response.content)
-        token_id = pb_response.payment_token
+        # Parse JSON response
+        json_response = response.json()
+        token_id = json_response["payment_token"]
 
         # Decrypt successfully
         request_id = str(uuid.uuid4())
@@ -306,10 +300,9 @@ class TestAuditLoggingForDecryption:
         response = create_token_helper()
         assert response.status_code == 201
 
-        # Parse response
-        pb_response = payment_token_pb2.CreatePaymentTokenResponse()
-        pb_response.ParseFromString(response.content)
-        token_id = pb_response.payment_token
+        # Parse JSON response
+        json_response = response.json()
+        token_id = json_response["payment_token"]
 
         # Decrypt with specific request ID
         request_id = f"test-correlation-{uuid.uuid4()}"

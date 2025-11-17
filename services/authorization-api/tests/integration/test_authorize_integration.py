@@ -11,8 +11,8 @@ These tests verify:
 import uuid
 
 import pytest
-from payments.v1.authorization_pb2 import AuthorizeRequest, AuthorizeResponse, AuthStatus
-from payments.v1.events_pb2 import AuthRequestCreated, AuthRequestQueuedMessage
+from payments_proto.payments.v1.authorization_pb2 import AuthorizeRequest, AuthorizeResponse, AuthStatus
+from payments_proto.payments.v1.events_pb2 import AuthRequestCreated, AuthRequestQueuedMessage
 
 from authorization_api.api.routes.authorize import (
     check_idempotency,

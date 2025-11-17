@@ -1,13 +1,12 @@
 """FastAPI routes for Payment Token Service.
 
 This module implements the REST API endpoints for payment token operations:
-- POST /v1/payment-tokens: Create payment token from device-encrypted data (JSON or protobuf)
-- GET /v1/payment-tokens/{token_id}: Retrieve token metadata (JSON or protobuf)
-- POST /internal/v1/decrypt: Decrypt token (internal API only)
+- POST /v1/payment-tokens: Create payment token from device-encrypted data (JSON)
+- GET /v1/payment-tokens/{token_id}: Retrieve token metadata (JSON)
+- POST /internal/v1/decrypt: Decrypt token (internal API, protobuf)
 
-The API supports both JSON and protobuf formats:
-- JSON: Content-Type: application/json, returns application/json
-- Protobuf: Content-Type: application/x-protobuf, returns application/x-protobuf
+External-facing endpoints use JSON for consistency with REST API standards.
+Internal service-to-service endpoints use protobuf for efficiency.
 """
 
 import base64
@@ -29,6 +28,7 @@ from payment_token.api.dependencies import (
 from payment_token.api.models import (
     CreatePaymentTokenRequestJSON,
     CreatePaymentTokenResponseJSON,
+    GetPaymentTokenResponseJSON,
 )
 from payment_token.config import settings
 from payment_token.domain.encryption import (
@@ -39,9 +39,6 @@ from payment_token.domain.encryption import (
 )
 from payment_token.domain.token import TokenError, TokenExpiredError, TokenOwnershipError
 from payment_token.infrastructure.kms import KMSError
-
-# Import generated protobuf messages
-from payments_proto.payments.v1 import payment_token_pb2
 
 logger = logging.getLogger(__name__)
 
@@ -65,16 +62,16 @@ async def create_payment_token(
 ) -> Response:
     """Create a payment token from device-encrypted payment data.
 
-    Supports both JSON and protobuf formats based on Content-Type header.
+    Accepts JSON requests only (Content-Type: application/json).
 
     This endpoint implements the complete token creation flow:
     1. Check idempotency key (return existing token if found)
-    2. Parse request (JSON or protobuf)
+    2. Parse JSON request
     3. Retrieve BDK from KMS (if BDK flow)
     4. Decrypt device-encrypted data using device-derived key or API partner key
     5. Re-encrypt with service rotating key
     6. Generate and store token
-    7. Return response (JSON or protobuf)
+    7. Return JSON response
 
     Args:
         request: FastAPI request object (for reading body)
@@ -86,7 +83,7 @@ async def create_payment_token(
         token_service: Token domain service for business logic
 
     Returns:
-        JSON or Protobuf-encoded CreatePaymentTokenResponse
+        JSON-encoded CreatePaymentTokenResponse
 
     Responses:
         201 Created: Token created successfully
@@ -98,13 +95,7 @@ async def create_payment_token(
     logger.info("Received create payment token request")
 
     try:
-        # Determine request format from Content-Type header
-        content_type = request.headers.get("content-type", "application/x-protobuf")
-        is_json = content_type.lower().startswith("application/json")
-
-        logger.debug(f"Request format: {'JSON' if is_json else 'protobuf'}")
-
-        # Read raw request body
+        # Read and parse JSON request body
         body = await request.body()
         if not body:
             raise HTTPException(
@@ -112,70 +103,37 @@ async def create_payment_token(
                 detail="Empty request body",
             )
 
-        # Parse request based on format
-        if is_json:
-            # Parse JSON request
-            try:
-                json_data = json.loads(body)
-                json_request = CreatePaymentTokenRequestJSON(**json_data)
-            except Exception as e:
-                logger.error(f"Failed to parse JSON request: {str(e)}")
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid JSON request: {str(e)}",
-                )
-
-            # Extract common fields
-            restaurant_id = json_request.restaurant_id
-            encrypted_payment_data = base64.b64decode(
-                json_request.encrypted_payment_data
+        # Parse JSON request
+        try:
+            json_data = json.loads(body)
+            json_request = CreatePaymentTokenRequestJSON(**json_data)
+        except Exception as e:
+            logger.error(f"Failed to parse JSON request: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid JSON request: {str(e)}",
             )
-            metadata_dict = json_request.metadata
-            has_encryption_metadata = json_request.encryption_metadata is not None
-            has_device_token = json_request.device_token is not None
 
-            # Parse encryption_metadata if provided
-            if has_encryption_metadata:
-                encryption_metadata = EncryptionMetadata(
-                    key_id=json_request.encryption_metadata.key_id,
-                    algorithm=json_request.encryption_metadata.algorithm,
-                    iv=json_request.encryption_metadata.iv,
-                )
-            else:
-                encryption_metadata = None
+        # Extract fields from JSON request
+        restaurant_id = json_request.restaurant_id
+        encrypted_payment_data = base64.b64decode(
+            json_request.encrypted_payment_data
+        )
+        metadata_dict = json_request.metadata
+        has_encryption_metadata = json_request.encryption_metadata is not None
+        has_device_token = json_request.device_token is not None
 
-            device_token = json_request.device_token
-
+        # Parse encryption_metadata if provided
+        if has_encryption_metadata:
+            encryption_metadata = EncryptionMetadata(
+                key_id=json_request.encryption_metadata.key_id,
+                algorithm=json_request.encryption_metadata.algorithm,
+                iv=json_request.encryption_metadata.iv,
+            )
         else:
-            # Parse protobuf request
-            try:
-                pb_request = payment_token_pb2.CreatePaymentTokenRequest()
-                pb_request.ParseFromString(body)
-            except Exception as e:
-                logger.error(f"Failed to parse protobuf request: {str(e)}")
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid protobuf request: {str(e)}",
-                )
+            encryption_metadata = None
 
-            # Extract common fields
-            restaurant_id = pb_request.restaurant_id
-            encrypted_payment_data = pb_request.encrypted_payment_data
-            metadata_dict = (
-                dict(pb_request.metadata) if pb_request.metadata else None
-            )
-            has_encryption_metadata = pb_request.HasField("encryption_metadata")
-            has_device_token = pb_request.HasField("device_token")
-
-            # Parse encryption_metadata if provided
-            if has_encryption_metadata:
-                encryption_metadata = EncryptionMetadata.from_protobuf(
-                    pb_request.encryption_metadata
-                )
-            else:
-                encryption_metadata = None
-
-            device_token = pb_request.device_token if has_device_token else None
+        device_token = json_request.device_token
 
         # Validate required fields
         if not restaurant_id:
@@ -231,38 +189,21 @@ async def create_payment_token(
                         detail="Internal error retrieving existing token",
                     )
 
-                # Return existing token with 200 OK (in same format as request)
-                if is_json:
-                    json_response = CreatePaymentTokenResponseJSON(
-                        payment_token=existing_token.payment_token,
-                        restaurant_id=existing_token.restaurant_id,
-                        expires_at=int(existing_token.expires_at.timestamp()),
-                        metadata=(
-                            existing_token.metadata.to_dict()
-                            if existing_token.metadata
-                            else {}
-                        ),
-                    )
-                    return JSONResponse(
-                        content=json_response.model_dump(),
-                        status_code=status.HTTP_200_OK,
-                    )
-                else:
-                    pb_response = payment_token_pb2.CreatePaymentTokenResponse(
-                        payment_token=existing_token.payment_token,
-                        restaurant_id=existing_token.restaurant_id,
-                        expires_at=int(existing_token.expires_at.timestamp()),
-                        metadata=(
-                            existing_token.metadata.to_dict()
-                            if existing_token.metadata
-                            else {}
-                        ),
-                    )
-                    return Response(
-                        content=pb_response.SerializeToString(),
-                        media_type="application/x-protobuf",
-                        status_code=status.HTTP_200_OK,
-                    )
+                # Return existing token with 200 OK (JSON response)
+                json_response = CreatePaymentTokenResponseJSON(
+                    payment_token=existing_token.payment_token,
+                    restaurant_id=existing_token.restaurant_id,
+                    expires_at=int(existing_token.expires_at.timestamp()),
+                    metadata=(
+                        existing_token.metadata.to_dict()
+                        if existing_token.metadata
+                        else {}
+                    ),
+                )
+                return JSONResponse(
+                    content=json_response.model_dump(),
+                    status_code=status.HTTP_200_OK,
+                )
 
         # Route to appropriate encryption flow
         try:
@@ -271,7 +212,6 @@ async def create_payment_token(
                 logger.debug("Using API partner key encryption flow")
 
                 # Create token using API partner key flow
-                # Pass decrypted format based on request format
                 token = token_service.create_token_from_api_partner_encrypted_data(
                     restaurant_id=restaurant_id,
                     encrypted_payment_data=encrypted_payment_data,
@@ -280,7 +220,7 @@ async def create_payment_token(
                     service_key_version=settings.current_key_version,
                     metadata_dict=metadata_dict,
                     expiration_hours=settings.default_token_ttl_hours,
-                    decrypted_format="json" if is_json else "protobuf",
+                    decrypted_format="json",
                 )
 
             else:
@@ -374,30 +314,17 @@ async def create_payment_token(
             f"Token {token.payment_token} created successfully for restaurant {restaurant_id}"
         )
 
-        # Build and return response (in same format as request)
-        if is_json:
-            json_response = CreatePaymentTokenResponseJSON(
-                payment_token=token.payment_token,
-                restaurant_id=token.restaurant_id,
-                expires_at=int(token.expires_at.timestamp()),
-                metadata=token.metadata.to_dict() if token.metadata else {},
-            )
-            return JSONResponse(
-                content=json_response.model_dump(),
-                status_code=status.HTTP_201_CREATED,
-            )
-        else:
-            pb_response = payment_token_pb2.CreatePaymentTokenResponse(
-                payment_token=token.payment_token,
-                restaurant_id=token.restaurant_id,
-                expires_at=int(token.expires_at.timestamp()),
-                metadata=token.metadata.to_dict() if token.metadata else {},
-            )
-            return Response(
-                content=pb_response.SerializeToString(),
-                media_type="application/x-protobuf",
-                status_code=status.HTTP_201_CREATED,
-            )
+        # Build and return JSON response
+        json_response = CreatePaymentTokenResponseJSON(
+            payment_token=token.payment_token,
+            restaurant_id=token.restaurant_id,
+            expires_at=int(token.expires_at.timestamp()),
+            metadata=token.metadata.to_dict() if token.metadata else {},
+        )
+        return JSONResponse(
+            content=json_response.model_dump(),
+            status_code=status.HTTP_201_CREATED,
+        )
 
     except HTTPException:
         # Re-raise HTTP exceptions as-is
@@ -422,6 +349,8 @@ async def get_payment_token(
 ) -> Response:
     """Retrieve payment token metadata (NOT the actual payment data).
 
+    Returns JSON response only.
+
     Args:
         token_id: Payment token ID to retrieve
         restaurant_id: Restaurant ID (must match token owner)
@@ -429,7 +358,7 @@ async def get_payment_token(
         token_repo: Token repository for database operations
 
     Returns:
-        Protobuf-encoded GetPaymentTokenResponse
+        JSON-encoded GetPaymentTokenResponse
 
     Responses:
         200 OK: Token found
@@ -458,21 +387,19 @@ async def get_payment_token(
                 detail="Token has expired",
             )
 
-        # Build protobuf response
-        pb_response = payment_token_pb2.GetPaymentTokenResponse(
+        # Build JSON response
+        json_response = GetPaymentTokenResponseJSON(
             payment_token=token.payment_token,
             restaurant_id=token.restaurant_id,
             created_at=int(token.created_at.timestamp()),
             expires_at=int(token.expires_at.timestamp()),
-            is_expired=token.is_expired(),
             metadata=token.metadata.to_dict() if token.metadata else {},
         )
 
         logger.info(f"Token {token_id} retrieved successfully")
 
-        return Response(
-            content=pb_response.SerializeToString(),
-            media_type="application/x-protobuf",
+        return JSONResponse(
+            content=json_response.model_dump(),
             status_code=status.HTTP_200_OK,
         )
 

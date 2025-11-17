@@ -5,6 +5,7 @@ services running in Docker containers.
 """
 
 import asyncio
+import base64
 import os
 import uuid
 from typing import Any, Optional
@@ -15,16 +16,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
-from payments.v1.authorization_pb2 import (
-    AuthorizeRequest,
-    AuthorizeResponse,
-    GetAuthStatusResponse,
-    AuthStatus,
-)
-
-# Import payment token protobuf
-import sys
-sys.path.insert(0, '/Users/randy/sudocodeai/demos/payments-infra/shared/python')
+# Import payment token protobuf (still needed for encrypting card data for device simulation)
 from payments_proto.payments.v1 import payment_token_pb2
 
 # Test configuration
@@ -77,7 +69,7 @@ class AuthorizationAPIClient:
         amount_cents: int,
         currency: str = "USD",
         metadata: Optional[dict[str, str]] = None,
-    ) -> AuthorizeResponse:
+    ) -> dict[str, Any]:
         """Submit authorization request.
 
         Args:
@@ -89,38 +81,35 @@ class AuthorizationAPIClient:
             metadata: Optional metadata dictionary
 
         Returns:
-            AuthorizeResponse protobuf
+            JSON response dict with auth_request_id, status, and optionally result
 
         Raises:
             httpx.HTTPError: If request fails
         """
-        # Build protobuf request
-        request = AuthorizeRequest(
-            restaurant_id=str(restaurant_id),
-            idempotency_key=idempotency_key,
-            payment_token=payment_token,
-            amount_cents=amount_cents,
-            currency=currency,
-        )
-        if metadata:
-            request.metadata.update(metadata)
+        # Build JSON request
+        request_data = {
+            "restaurant_id": str(restaurant_id),
+            "idempotency_key": idempotency_key,
+            "payment_token": payment_token,
+            "amount_cents": amount_cents,
+            "currency": currency,
+            "metadata": metadata or {},
+        }
 
         # Send request
         response = await self.client.post(
             "/v1/authorize",
-            content=request.SerializeToString(),
-            headers={"Content-Type": "application/x-protobuf"},
+            json=request_data,
+            headers={"Content-Type": "application/json"},
         )
         response.raise_for_status()
 
-        # Parse response
-        auth_response = AuthorizeResponse()
-        auth_response.ParseFromString(response.content)
-        return auth_response
+        # Parse and return JSON response
+        return response.json()
 
     async def get_status(
         self, auth_request_id: uuid.UUID, restaurant_id: uuid.UUID
-    ) -> GetAuthStatusResponse:
+    ) -> dict[str, Any]:
         """Get authorization status.
 
         Args:
@@ -128,7 +117,7 @@ class AuthorizationAPIClient:
             restaurant_id: Restaurant UUID
 
         Returns:
-            GetAuthStatusResponse protobuf
+            JSON response dict with auth_request_id, status, created_at, updated_at, and optionally result
 
         Raises:
             httpx.HTTPError: If request fails
@@ -139,10 +128,8 @@ class AuthorizationAPIClient:
         )
         response.raise_for_status()
 
-        # Parse response
-        status_response = GetAuthStatusResponse()
-        status_response.ParseFromString(response.content)
-        return status_response
+        # Parse and return JSON response
+        return response.json()
 
     async def poll_until_complete(
         self,
@@ -150,7 +137,7 @@ class AuthorizationAPIClient:
         restaurant_id: uuid.UUID,
         timeout: float = 30.0,
         interval: float = 1.0,
-    ) -> GetAuthStatusResponse:
+    ) -> dict[str, Any]:
         """Poll status until authorization completes.
 
         Args:
@@ -160,7 +147,7 @@ class AuthorizationAPIClient:
             interval: Time between polls in seconds
 
         Returns:
-            GetAuthStatusResponse protobuf when complete
+            JSON response dict when complete
 
         Raises:
             TimeoutError: If authorization doesn't complete within timeout
@@ -169,12 +156,8 @@ class AuthorizationAPIClient:
         while asyncio.get_event_loop().time() - start < timeout:
             status = await self.get_status(auth_request_id, restaurant_id)
 
-            # Check if completed
-            if status.status in (
-                AuthStatus.AUTH_STATUS_AUTHORIZED,
-                AuthStatus.AUTH_STATUS_DENIED,
-                AuthStatus.AUTH_STATUS_FAILED,
-            ):
+            # Check if completed (status values are strings: "AUTHORIZED", "DENIED", "FAILED")
+            if status["status"] in ("AUTHORIZED", "DENIED", "FAILED"):
                 return status
 
             await asyncio.sleep(interval)
@@ -329,32 +312,31 @@ class PaymentTokenServiceClient:
             cardholder_name=cardholder_name,
         )
 
-        # Create protobuf request
-        pb_request = payment_token_pb2.CreatePaymentTokenRequest(
-            restaurant_id=restaurant_id,
-            encrypted_payment_data=encrypted_payment_data,
-            device_token=device_token,
-            idempotency_key=idempotency_key,
-        )
+        # Build JSON request
+        request_data = {
+            "restaurant_id": restaurant_id,
+            "encrypted_payment_data": base64.b64encode(encrypted_payment_data).decode("utf-8"),
+            "device_token": device_token,
+            "metadata": {},
+        }
 
         # Send request
         response = await self.client.post(
             "/v1/payment-tokens",
-            content=pb_request.SerializeToString(),
+            json=request_data,
             headers={
-                "Content-Type": "application/x-protobuf",
+                "Content-Type": "application/json",
                 "X-Idempotency-Key": idempotency_key,
             },
         )
         response.raise_for_status()
 
-        # Parse protobuf response
-        pb_response = payment_token_pb2.CreatePaymentTokenResponse()
-        pb_response.ParseFromString(response.content)
+        # Parse JSON response
+        json_response = response.json()
 
         # Return as dict for compatibility with existing tests
         return {
-            "token_id": pb_response.payment_token,
-            "restaurant_id": pb_response.restaurant_id,
-            "expires_at": pb_response.expires_at,
+            "token_id": json_response["payment_token"],
+            "restaurant_id": json_response["restaurant_id"],
+            "expires_at": json_response["expires_at"],
         }

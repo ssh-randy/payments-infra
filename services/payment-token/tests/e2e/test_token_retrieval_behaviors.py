@@ -5,6 +5,7 @@ Tests:
 - B5: Restaurant Scoping
 """
 
+import base64
 import time
 import uuid
 import sys
@@ -29,9 +30,8 @@ class TestTokenExpiration:
         assert response.status_code == 201
 
         # Parse response
-        pb_response = payment_token_pb2.CreatePaymentTokenResponse()
-        pb_response.ParseFromString(response.content)
-        token_id = pb_response.payment_token
+        json_response = response.json()
+        token_id = json_response["payment_token"]
 
         # Retrieve token metadata immediately (should work)
         get_response = api_client.get(
@@ -43,13 +43,11 @@ class TestTokenExpiration:
         assert get_response.status_code == 200
 
         # Parse and verify response
-        get_pb_response = payment_token_pb2.GetPaymentTokenResponse()
-        get_pb_response.ParseFromString(get_response.content)
+        get_json_response = get_response.json()
 
-        assert get_pb_response.payment_token == token_id
-        assert get_pb_response.restaurant_id == test_restaurant_id
-        assert not get_pb_response.is_expired  # Should not be expired
-        assert get_pb_response.expires_at > int(time.time())  # Expiration in future
+        assert get_json_response["payment_token"] == token_id
+        assert get_json_response["restaurant_id"] == test_restaurant_id
+        assert get_json_response["expires_at"] > int(time.time())  # Expiration in future
 
     def test_expired_token_returns_410_on_get(
         self, api_client, test_restaurant_id, test_device_token, idempotency_key, encrypt_payment_data_fn
@@ -99,9 +97,8 @@ class TestRestaurantScoping:
         assert response.status_code == 201
 
         # Parse response
-        pb_response = payment_token_pb2.CreatePaymentTokenResponse()
-        pb_response.ParseFromString(response.content)
-        token_id = pb_response.payment_token
+        json_response = response.json()
+        token_id = json_response["payment_token"]
 
         # Retrieve token with correct restaurant_id
         get_response = api_client.get(
@@ -113,10 +110,9 @@ class TestRestaurantScoping:
         assert get_response.status_code == 200
 
         # Parse and verify
-        get_pb_response = payment_token_pb2.GetPaymentTokenResponse()
-        get_pb_response.ParseFromString(get_response.content)
-        assert get_pb_response.payment_token == token_id
-        assert get_pb_response.restaurant_id == test_restaurant_id
+        get_json_response = get_response.json()
+        assert get_json_response["payment_token"] == token_id
+        assert get_json_response["restaurant_id"] == test_restaurant_id
 
     def test_wrong_restaurant_id_returns_404_on_get(
         self, api_client, create_token_helper, test_restaurant_id
@@ -127,9 +123,8 @@ class TestRestaurantScoping:
         assert response.status_code == 201
 
         # Parse response
-        pb_response = payment_token_pb2.CreatePaymentTokenResponse()
-        pb_response.ParseFromString(response.content)
-        token_id = pb_response.payment_token
+        json_response = response.json()
+        token_id = json_response["payment_token"]
 
         # Try to retrieve token with WRONG restaurant_id
         wrong_restaurant_id = str(uuid.uuid4())
@@ -150,11 +145,10 @@ class TestRestaurantScoping:
         assert response.status_code == 201
 
         # Parse response
-        pb_response = payment_token_pb2.CreatePaymentTokenResponse()
-        pb_response.ParseFromString(response.content)
-        token_id = pb_response.payment_token
+        json_response = response.json()
+        token_id = json_response["payment_token"]
 
-        # Try to decrypt with WRONG restaurant_id
+        # Try to decrypt with WRONG restaurant_id (internal endpoint still uses protobuf)
         wrong_restaurant_id = str(uuid.uuid4())
         decrypt_request = payment_token_pb2.DecryptPaymentTokenRequest(
             payment_token=token_id,
@@ -193,26 +187,25 @@ class TestRestaurantScoping:
         }
         encrypted_data_a = encrypt_payment_data_fn(payment_data, test_device_token)
 
-        request_a = payment_token_pb2.CreatePaymentTokenRequest(
-            restaurant_id=restaurant_a,
-            encrypted_payment_data=encrypted_data_a,
-            device_token=test_device_token,
-            idempotency_key=str(uuid.uuid4()),
-        )
+        idempotency_key_a = str(uuid.uuid4())
+        json_request_a = {
+            "restaurant_id": restaurant_a,
+            "encrypted_payment_data": base64.b64encode(encrypted_data_a).decode(),
+            "device_token": test_device_token,
+            "idempotency_key": idempotency_key_a,
+        }
 
         response_a = api_client.post(
             "/v1/payment-tokens",
-            content=request_a.SerializeToString(),
+            json=json_request_a,
             headers={
-                "Content-Type": "application/x-protobuf",
-                "X-Idempotency-Key": request_a.idempotency_key,
+                "X-Idempotency-Key": idempotency_key_a,
             },
         )
         assert response_a.status_code == 201
 
-        pb_response_a = payment_token_pb2.CreatePaymentTokenResponse()
-        pb_response_a.ParseFromString(response_a.content)
-        token_a = pb_response_a.payment_token
+        json_response_a = response_a.json()
+        token_a = json_response_a["payment_token"]
 
         # Create token for restaurant B
         payment_data_b = {
@@ -224,26 +217,25 @@ class TestRestaurantScoping:
         }
         encrypted_data_b = encrypt_payment_data_fn(payment_data_b, test_device_token)
 
-        request_b = payment_token_pb2.CreatePaymentTokenRequest(
-            restaurant_id=restaurant_b,
-            encrypted_payment_data=encrypted_data_b,
-            device_token=test_device_token,
-            idempotency_key=str(uuid.uuid4()),
-        )
+        idempotency_key_b = str(uuid.uuid4())
+        json_request_b = {
+            "restaurant_id": restaurant_b,
+            "encrypted_payment_data": base64.b64encode(encrypted_data_b).decode(),
+            "device_token": test_device_token,
+            "idempotency_key": idempotency_key_b,
+        }
 
         response_b = api_client.post(
             "/v1/payment-tokens",
-            content=request_b.SerializeToString(),
+            json=json_request_b,
             headers={
-                "Content-Type": "application/x-protobuf",
-                "X-Idempotency-Key": request_b.idempotency_key,
+                "X-Idempotency-Key": idempotency_key_b,
             },
         )
         assert response_b.status_code == 201
 
-        pb_response_b = payment_token_pb2.CreatePaymentTokenResponse()
-        pb_response_b.ParseFromString(response_b.content)
-        token_b = pb_response_b.payment_token
+        json_response_b = response_b.json()
+        token_b = json_response_b["payment_token"]
 
         # Verify restaurant A can access token A
         get_a_by_a = api_client.get(

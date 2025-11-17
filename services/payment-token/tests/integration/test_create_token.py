@@ -1,13 +1,14 @@
 """Integration tests for POST /v1/payment-tokens endpoint.
 
 Tests the complete flow of token creation including:
-- Protobuf request/response handling
+- JSON request/response handling
 - Device decryption and re-encryption
 - Idempotency
 - Database persistence
 - Error handling
 """
 
+import base64
 import hashlib
 import sys
 import uuid
@@ -21,7 +22,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, '/Users/randy/sudocodeai/demos/payments-infra/shared/python/payments_proto')
-from payments.v1 import payment_token_pb2
+from payments_proto.payments.v1 import payment_token_pb2
 
 from payment_token.api.main import app
 from payment_token.domain.encryption import encrypt_with_key, derive_device_key
@@ -188,64 +189,63 @@ def device_encrypted_payment_data(payment_data, test_bdk, device_token):
 
 def test_create_token_success(client, restaurant_id, device_token, device_encrypted_payment_data):
     """Test successful token creation."""
-    # Prepare protobuf request
-    pb_request = payment_token_pb2.CreatePaymentTokenRequest(
-        restaurant_id=restaurant_id,
-        encrypted_payment_data=device_encrypted_payment_data,
-        device_token=device_token,
-        idempotency_key=str(uuid.uuid4()),
-        metadata={
+    idempotency_key = str(uuid.uuid4())
+
+    # Prepare JSON request
+    json_request = {
+        "restaurant_id": restaurant_id,
+        "encrypted_payment_data": base64.b64encode(device_encrypted_payment_data).decode(),
+        "device_token": device_token,
+        "idempotency_key": idempotency_key,
+        "metadata": {
             "pos_terminal": "T123",
             "transaction_type": "sale",
         },
-    )
+    }
 
     # Send request
     response = client.post(
         "/v1/payment-tokens",
-        content=pb_request.SerializeToString(),
+        json=json_request,
         headers={
-            "Content-Type": "application/x-protobuf",
             "Authorization": "Bearer test-api-key-1234567890",
-            "X-Idempotency-Key": pb_request.idempotency_key,
+            "X-Idempotency-Key": idempotency_key,
         },
     )
 
     # Assert response
     assert response.status_code == 201
-    assert response.headers["content-type"] == "application/x-protobuf"
+    assert response.headers["content-type"] == "application/json"
 
-    # Parse protobuf response
-    pb_response = payment_token_pb2.CreatePaymentTokenResponse()
-    pb_response.ParseFromString(response.content)
+    # Parse JSON response
+    json_response = response.json()
 
     # Verify response fields
-    assert pb_response.payment_token.startswith("pt_")
-    assert pb_response.restaurant_id == restaurant_id
-    assert pb_response.expires_at > int(datetime.utcnow().timestamp())
-    assert "card_brand" in pb_response.metadata
-    assert "last4" in pb_response.metadata
-    assert pb_response.metadata["last4"] == "1111"
+    assert json_response["payment_token"].startswith("pt_")
+    assert json_response["restaurant_id"] == restaurant_id
+    assert json_response["expires_at"] > int(datetime.utcnow().timestamp())
+    assert "card_brand" in json_response["metadata"]
+    assert "last4" in json_response["metadata"]
+    assert json_response["metadata"]["last4"] == "1111"
 
 
 def test_create_token_idempotency(client, restaurant_id, device_token, device_encrypted_payment_data):
     """Test idempotency: same idempotency key returns same token."""
     idempotency_key = str(uuid.uuid4())
 
-    # Prepare protobuf request
-    pb_request = payment_token_pb2.CreatePaymentTokenRequest(
-        restaurant_id=restaurant_id,
-        encrypted_payment_data=device_encrypted_payment_data,
-        device_token=device_token,
-        idempotency_key=idempotency_key,
-    )
+    # Prepare JSON request
+    json_request = {
+        "restaurant_id": restaurant_id,
+        "encrypted_payment_data": base64.b64encode(device_encrypted_payment_data).decode(),
+        "device_token": device_token,
+        "idempotency_key": idempotency_key,
+    }
 
     # First request
     response1 = client.post(
         "/v1/payment-tokens",
-        content=pb_request.SerializeToString(),
+        json=json_request,
         headers={
-            "Content-Type": "application/x-protobuf",
             "Authorization": "Bearer test-api-key-1234567890",
             "X-Idempotency-Key": idempotency_key,
         },
@@ -253,16 +253,14 @@ def test_create_token_idempotency(client, restaurant_id, device_token, device_en
 
     assert response1.status_code == 201
 
-    pb_response1 = payment_token_pb2.CreatePaymentTokenResponse()
-    pb_response1.ParseFromString(response1.content)
-    token1 = pb_response1.payment_token
+    json_response1 = response1.json()
+    token1 = json_response1["payment_token"]
 
     # Second request with same idempotency key
     response2 = client.post(
         "/v1/payment-tokens",
-        content=pb_request.SerializeToString(),
+        json=json_request,
         headers={
-            "Content-Type": "application/x-protobuf",
             "Authorization": "Bearer test-api-key-1234567890",
             "X-Idempotency-Key": idempotency_key,
         },
@@ -271,9 +269,8 @@ def test_create_token_idempotency(client, restaurant_id, device_token, device_en
     # Should return 200 OK (idempotent) with same token
     assert response2.status_code == 200
 
-    pb_response2 = payment_token_pb2.CreatePaymentTokenResponse()
-    pb_response2.ParseFromString(response2.content)
-    token2 = pb_response2.payment_token
+    json_response2 = response2.json()
+    token2 = json_response2["payment_token"]
 
     # Verify same token returned
     assert token1 == token2
@@ -281,17 +278,16 @@ def test_create_token_idempotency(client, restaurant_id, device_token, device_en
 
 def test_create_token_missing_restaurant_id(client, device_token, device_encrypted_payment_data):
     """Test validation: missing restaurant_id."""
-    pb_request = payment_token_pb2.CreatePaymentTokenRequest(
-        restaurant_id="",  # Empty
-        encrypted_payment_data=device_encrypted_payment_data,
-        device_token=device_token,
-    )
+    json_request = {
+        "restaurant_id": "",  # Empty
+        "encrypted_payment_data": base64.b64encode(device_encrypted_payment_data).decode(),
+        "device_token": device_token,
+    }
 
     response = client.post(
         "/v1/payment-tokens",
-        content=pb_request.SerializeToString(),
+        json=json_request,
         headers={
-            "Content-Type": "application/x-protobuf",
             "Authorization": "Bearer test-api-key-1234567890",
         },
     )
@@ -302,17 +298,16 @@ def test_create_token_missing_restaurant_id(client, device_token, device_encrypt
 
 def test_create_token_missing_encrypted_data(client, restaurant_id, device_token):
     """Test validation: missing encrypted_payment_data."""
-    pb_request = payment_token_pb2.CreatePaymentTokenRequest(
-        restaurant_id=restaurant_id,
-        encrypted_payment_data=b"",  # Empty
-        device_token=device_token,
-    )
+    json_request = {
+        "restaurant_id": restaurant_id,
+        "encrypted_payment_data": "",  # Empty
+        "device_token": device_token,
+    }
 
     response = client.post(
         "/v1/payment-tokens",
-        content=pb_request.SerializeToString(),
+        json=json_request,
         headers={
-            "Content-Type": "application/x-protobuf",
             "Authorization": "Bearer test-api-key-1234567890",
         },
     )
@@ -326,17 +321,16 @@ def test_create_token_invalid_device_token(client, restaurant_id):
     # Use garbage encrypted data that won't decrypt
     invalid_encrypted_data = b"invalid_encrypted_data_that_wont_decrypt"
 
-    pb_request = payment_token_pb2.CreatePaymentTokenRequest(
-        restaurant_id=restaurant_id,
-        encrypted_payment_data=invalid_encrypted_data,
-        device_token="wrong-device-token",
-    )
+    json_request = {
+        "restaurant_id": restaurant_id,
+        "encrypted_payment_data": base64.b64encode(invalid_encrypted_data).decode(),
+        "device_token": "wrong-device-token",
+    }
 
     response = client.post(
         "/v1/payment-tokens",
-        content=pb_request.SerializeToString(),
+        json=json_request,
         headers={
-            "Content-Type": "application/x-protobuf",
             "Authorization": "Bearer test-api-key-1234567890",
         },
     )
@@ -348,17 +342,16 @@ def test_create_token_invalid_device_token(client, restaurant_id):
 
 def test_create_token_unauthorized(client, restaurant_id, device_token, device_encrypted_payment_data):
     """Test authentication: missing or invalid API key."""
-    pb_request = payment_token_pb2.CreatePaymentTokenRequest(
-        restaurant_id=restaurant_id,
-        encrypted_payment_data=device_encrypted_payment_data,
-        device_token=device_token,
-    )
+    json_request = {
+        "restaurant_id": restaurant_id,
+        "encrypted_payment_data": base64.b64encode(device_encrypted_payment_data).decode(),
+        "device_token": device_token,
+    }
 
     # Request without Authorization header
     response = client.post(
         "/v1/payment-tokens",
-        content=pb_request.SerializeToString(),
-        headers={"Content-Type": "application/x-protobuf"},
+        json=json_request,
     )
 
     assert response.status_code == 401
@@ -366,18 +359,17 @@ def test_create_token_unauthorized(client, restaurant_id, device_token, device_e
 
 def test_create_token_invalid_api_key(client, restaurant_id, device_token, device_encrypted_payment_data):
     """Test authentication: API key too short."""
-    pb_request = payment_token_pb2.CreatePaymentTokenRequest(
-        restaurant_id=restaurant_id,
-        encrypted_payment_data=device_encrypted_payment_data,
-        device_token=device_token,
-    )
+    json_request = {
+        "restaurant_id": restaurant_id,
+        "encrypted_payment_data": base64.b64encode(device_encrypted_payment_data).decode(),
+        "device_token": device_token,
+    }
 
     # Request with invalid API key (too short)
     response = client.post(
         "/v1/payment-tokens",
-        content=pb_request.SerializeToString(),
+        json=json_request,
         headers={
-            "Content-Type": "application/x-protobuf",
             "Authorization": "Bearer short",
         },
     )
@@ -388,26 +380,24 @@ def test_create_token_invalid_api_key(client, restaurant_id, device_token, devic
 def test_get_token_success(client, restaurant_id, device_token, device_encrypted_payment_data):
     """Test GET /v1/payment-tokens/{token_id} success."""
     # First create a token
-    pb_create_request = payment_token_pb2.CreatePaymentTokenRequest(
-        restaurant_id=restaurant_id,
-        encrypted_payment_data=device_encrypted_payment_data,
-        device_token=device_token,
-    )
+    json_create_request = {
+        "restaurant_id": restaurant_id,
+        "encrypted_payment_data": base64.b64encode(device_encrypted_payment_data).decode(),
+        "device_token": device_token,
+    }
 
     create_response = client.post(
         "/v1/payment-tokens",
-        content=pb_create_request.SerializeToString(),
+        json=json_create_request,
         headers={
-            "Content-Type": "application/x-protobuf",
             "Authorization": "Bearer test-api-key-1234567890",
         },
     )
 
     assert create_response.status_code == 201
 
-    pb_create_response = payment_token_pb2.CreatePaymentTokenResponse()
-    pb_create_response.ParseFromString(create_response.content)
-    token_id = pb_create_response.payment_token
+    json_create_response = create_response.json()
+    token_id = json_create_response["payment_token"]
 
     # Now retrieve it
     get_response = client.get(
@@ -418,13 +408,12 @@ def test_get_token_success(client, restaurant_id, device_token, device_encrypted
 
     assert get_response.status_code == 200
 
-    pb_get_response = payment_token_pb2.GetPaymentTokenResponse()
-    pb_get_response.ParseFromString(get_response.content)
+    json_get_response = get_response.json()
 
-    assert pb_get_response.payment_token == token_id
-    assert pb_get_response.restaurant_id == restaurant_id
-    assert pb_get_response.is_expired == False
-    assert "card_brand" in pb_get_response.metadata
+    assert json_get_response["payment_token"] == token_id
+    assert json_get_response["restaurant_id"] == restaurant_id
+    assert json_get_response["expires_at"] > int(datetime.utcnow().timestamp())
+    assert "card_brand" in json_get_response["metadata"]
 
 
 def test_get_token_not_found(client, restaurant_id):
@@ -441,24 +430,22 @@ def test_get_token_not_found(client, restaurant_id):
 def test_get_token_wrong_restaurant(client, restaurant_id, device_token, device_encrypted_payment_data):
     """Test GET token with wrong restaurant ID (ownership check)."""
     # Create token for one restaurant
-    pb_create_request = payment_token_pb2.CreatePaymentTokenRequest(
-        restaurant_id=restaurant_id,
-        encrypted_payment_data=device_encrypted_payment_data,
-        device_token=device_token,
-    )
+    json_create_request = {
+        "restaurant_id": restaurant_id,
+        "encrypted_payment_data": base64.b64encode(device_encrypted_payment_data).decode(),
+        "device_token": device_token,
+    }
 
     create_response = client.post(
         "/v1/payment-tokens",
-        content=pb_create_request.SerializeToString(),
+        json=json_create_request,
         headers={
-            "Content-Type": "application/x-protobuf",
             "Authorization": "Bearer test-api-key-1234567890",
         },
     )
 
-    pb_create_response = payment_token_pb2.CreatePaymentTokenResponse()
-    pb_create_response.ParseFromString(create_response.content)
-    token_id = pb_create_response.payment_token
+    json_create_response = create_response.json()
+    token_id = json_create_response["payment_token"]
 
     # Try to retrieve with different restaurant ID
     different_restaurant_id = str(uuid.uuid4())

@@ -13,19 +13,17 @@ RUN apt-get update && apt-get install -y \
 # Install Poetry
 RUN pip install poetry
 
+# Copy shared dependencies first
+COPY shared/python/payments_proto/ /tmp/payments_proto/
+
 # Copy dependency files
 COPY services/auth-processor-worker/pyproject.toml ./
 COPY services/auth-processor-worker/poetry.lock* ./
 
-# Install dependencies
+# Install payments_proto package and other dependencies
 RUN poetry config virtualenvs.create false \
+    && pip install /tmp/payments_proto/ \
     && poetry install --no-interaction --no-ansi --no-root
-
-# Copy protobuf files from shared directory
-COPY shared/python/payments_proto/ ./payments_proto/
-
-# Create symlink for protobuf imports to work
-RUN ln -s /app/payments_proto/payments /app/payments
 
 # Copy application code
 COPY services/auth-processor-worker/src/ ./

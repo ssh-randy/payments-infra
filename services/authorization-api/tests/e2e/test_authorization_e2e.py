@@ -15,13 +15,13 @@ import httpx
 import pytest
 import pytest_asyncio
 
-from payments.v1.authorization_pb2 import (
+from payments_proto.payments.v1.authorization_pb2 import (
     AuthorizeRequest,
     AuthorizeResponse,
     AuthStatus,
     GetAuthStatusResponse,
 )
-from payments.v1.events_pb2 import AuthRequestQueuedMessage
+from payments_proto.payments.v1.events_pb2 import AuthRequestQueuedMessage
 
 from authorization_api.api.main import app
 

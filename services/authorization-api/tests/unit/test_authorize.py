@@ -4,7 +4,7 @@ import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from payments.v1.authorization_pb2 import AuthorizeRequest, AuthorizeResponse, AuthStatus
+from payments_proto.payments.v1.authorization_pb2 import AuthorizeRequest, AuthorizeResponse, AuthStatus
 
 
 @pytest.fixture

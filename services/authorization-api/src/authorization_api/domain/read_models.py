@@ -8,7 +8,7 @@ from typing import Any
 import asyncpg
 import structlog
 
-from payments.v1.authorization_pb2 import (
+from payments_proto.payments.v1.authorization_pb2 import (
     AuthStatus,
     AuthorizationResult,
     GetAuthStatusResponse,

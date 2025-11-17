@@ -8,7 +8,7 @@ from typing import Any, Awaitable, Callable
 import aioboto3
 from botocore.exceptions import BotoCoreError, ClientError
 
-from payments.v1.events_pb2 import AuthRequestQueuedMessage
+from payments_proto.payments.v1.events_pb2 import AuthRequestQueuedMessage
 from auth_processor_worker.logging_config import get_logger
 
 logger = get_logger(__name__)

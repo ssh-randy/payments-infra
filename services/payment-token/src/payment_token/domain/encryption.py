@@ -317,12 +317,9 @@ def get_decryption_key(key_id: str) -> bytes:
     - "bdk_{identifier}": BDK-based keys for POS terminals (future)
 
     Phase 1 Implementation:
-        Currently supports only the primary demo key. This unblocks frontend
-        demo and establishes the routing architecture for future phases.
-
-        For the demo, we derive the key using PBKDF2 to match the frontend's
-        encryption. This allows the frontend to encrypt and the backend to decrypt
-        using the same key derivation.
+        Currently supports only the primary demo key from PRIMARY_ENCRYPTION_KEY
+        environment variable. This unblocks API partner key flow testing and
+        establishes the routing architecture for future phases.
 
     Args:
         key_id: Key identifier from EncryptionMetadata
@@ -332,44 +329,45 @@ def get_decryption_key(key_id: str) -> bytes:
 
     Raises:
         ValueError: If key_id is unknown or unsupported
-        EncryptionError: If key retrieval fails
+        EncryptionError: If key retrieval fails or PRIMARY_ENCRYPTION_KEY is invalid
 
     Security notes:
-        - Phase 1: Demo key is derived using PBKDF2 (matches frontend)
+        - Phase 1: Primary key from PRIMARY_ENCRYPTION_KEY environment variable
         - Phase 2: API partner keys will be retrieved from database + KMS
         - Future: BDK keys will use key derivation
     """
+    import os
+
     logger.debug(f"Looking up decryption key for key_id: {key_id}")
 
     # Phase 1: Support primary demo key
     if key_id in ("demo-primary-key-001", "primary"):
-        # For demo purposes, derive key using same method as frontend
-        # This allows browser-encrypted data to be decrypted by backend
-        #
-        # Frontend uses: PBKDF2(master_key='demo-master-key-not-for-production',
-        #                       salt=key_id, iterations=100000, hash=SHA-256)
-        #
-        # ⚠️ WARNING: This is for DEMO ONLY. In production:
-        # - Use secure key management (KMS, vault, etc.)
-        # - Never derive keys from hardcoded strings
-        # - Prefer Stripe Elements to avoid handling raw card data
+        # Get key from environment variable
+        key_hex = os.getenv("PRIMARY_ENCRYPTION_KEY")
 
-        from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-        from cryptography.hazmat.backends import default_backend
+        if not key_hex:
+            raise EncryptionError(
+                "PRIMARY_ENCRYPTION_KEY environment variable not set. "
+                "This is required for API partner key encryption."
+            )
 
-        demo_master_key = b"demo-master-key-not-for-production"
-        salt = key_id.encode('utf-8')
+        # Validate and decode hex format
+        try:
+            key = bytes.fromhex(key_hex)
+        except ValueError as e:
+            raise EncryptionError(
+                f"Invalid PRIMARY_ENCRYPTION_KEY format. Must be a valid hex string. "
+                f"Error: {e}"
+            ) from e
 
-        kdf = PBKDF2HMAC(
-            algorithm=hashes.SHA256(),
-            length=32,
-            salt=salt,
-            iterations=100000,
-            backend=default_backend()
-        )
+        # Validate key length (must be 32 bytes for AES-256)
+        if len(key) != 32:
+            raise EncryptionError(
+                f"Primary key must be 32 bytes (64 hex characters), got {len(key)} bytes. "
+                f"For AES-256-GCM encryption, a 256-bit (32-byte) key is required."
+            )
 
-        key = kdf.derive(demo_master_key)
-        logger.debug(f"Derived demo decryption key (length: {len(key)} bytes)")
+        logger.debug(f"Retrieved primary encryption key from environment (length: {len(key)} bytes)")
         return key
 
     # Future Phase 2: API partner keys

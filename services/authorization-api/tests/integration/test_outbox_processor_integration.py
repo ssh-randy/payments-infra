@@ -9,7 +9,7 @@ import boto3
 import pytest
 import pytest_asyncio
 
-from payments.v1.events_pb2 import AuthRequestQueuedMessage, VoidRequestQueuedMessage
+from payments_proto.payments.v1.events_pb2 import AuthRequestQueuedMessage, VoidRequestQueuedMessage
 
 from authorization_api.infrastructure.outbox import write_outbox_message
 from authorization_api.infrastructure.outbox_processor import process_outbox_batch

@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from payments.v1.events_pb2 import AuthRequestQueuedMessage, VoidRequestQueuedMessage
+from payments_proto.payments.v1.events_pb2 import AuthRequestQueuedMessage, VoidRequestQueuedMessage
 
 from authorization_api.infrastructure.outbox_processor import (
     fetch_unprocessed_messages,

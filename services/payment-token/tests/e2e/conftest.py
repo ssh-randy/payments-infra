@@ -4,6 +4,7 @@ This module provides fixtures for black-box testing of the Payment Token Service
 running in Docker. Tests interact with the service via HTTP API only.
 """
 
+import base64
 import os
 import subprocess
 import time
@@ -245,23 +246,22 @@ def create_token_helper(api_client, test_restaurant_id, test_device_token, idemp
         # Encrypt payment data
         encrypted_data = encrypt_payment_data(payment_data, device_token)
 
-        # Create protobuf request
-        request = payment_token_pb2.CreatePaymentTokenRequest(
-            restaurant_id=restaurant_id,
-            encrypted_payment_data=encrypted_data,
-            device_token=device_token,
-            idempotency_key=idempotency_key_value,
-        )
+        # Create JSON request
+        json_request = {
+            "restaurant_id": restaurant_id,
+            "encrypted_payment_data": base64.b64encode(encrypted_data).decode(),
+            "device_token": device_token,
+            "idempotency_key": idempotency_key_value,
+        }
 
         if metadata:
-            request.metadata.update(metadata)
+            json_request["metadata"] = metadata
 
         # Send request
         return api_client.post(
             "/v1/payment-tokens",
-            content=request.SerializeToString(),
+            json=json_request,
             headers={
-                "Content-Type": "application/x-protobuf",
                 "X-Idempotency-Key": idempotency_key_value,
             },
         )

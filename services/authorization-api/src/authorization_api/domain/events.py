@@ -6,7 +6,7 @@ from typing import Any
 import uuid
 from datetime import datetime
 
-from payments.v1.events_pb2 import (
+from payments_proto.payments.v1.events_pb2 import (
     AuthRequestCreated,
     AuthAttemptStarted,
     AuthResponseReceived,
@@ -16,7 +16,7 @@ from payments.v1.events_pb2 import (
     AuthRequestQueuedMessage,
     VoidRequestQueuedMessage,
 )
-from payments.v1.authorization_pb2 import AuthStatus, AuthorizationResult
+from payments_proto.payments.v1.authorization_pb2 import AuthStatus, AuthorizationResult
 
 
 @dataclass

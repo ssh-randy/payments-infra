@@ -3,7 +3,7 @@
 import asyncio
 import structlog
 
-from payments.v1.events_pb2 import (
+from payments_proto.payments.v1.events_pb2 import (
     AuthRequestQueuedMessage,
     VoidRequestQueuedMessage,
 )
