@@ -233,3 +233,32 @@ class DecryptAuditLog(Base):
         Index("idx_token_created", "payment_token", "created_at"),
         # Note: Table partitioning by month would be defined in the Alembic migration
     )
+
+
+class PaymentIdentityToken(Base):
+    """
+    Table for storing payment identity tokens with HMAC-based lookup.
+
+    Stores payment token GUIDs with their corresponding HMAC hashes
+    for secure token retrieval without exposing sensitive data.
+    """
+
+    __tablename__ = "payment_identity_tokens"
+
+    # Primary identifier (format: pit_<uuid>)
+    payment_token_guid: Mapped[str] = mapped_column(
+        String(64), primary_key=True, comment="Unique payment token identifier (e.g., pit_<uuid>)"
+    )
+
+    # HMAC hash for secure lookup
+    hmac: Mapped[str] = mapped_column(
+        String(128), nullable=False, index=True, comment="HMAC hash for secure lookup"
+    )
+
+    # Creation timestamp
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        comment="Token creation timestamp",
+    )
