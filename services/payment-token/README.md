@@ -113,6 +113,8 @@ poetry run pytest tests/integration -v
 docker-compose -f docker-compose.integration.yml down
 ```
 
+> **Note:** When running tests via pytest, the test database (`payment_tokens_test`) is automatically created if it doesn't exist. The test fixtures handle database creation and migration automatically.
+
 **View all available commands:**
 ```bash
 make help
