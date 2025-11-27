@@ -233,3 +233,43 @@ class DecryptAuditLog(Base):
         Index("idx_token_created", "payment_token", "created_at"),
         # Note: Table partitioning by month would be defined in the Alembic migration
     )
+
+
+class PaymentIdentityMapping(Base):
+    """
+    Payment identity token mapping.
+
+    Maps HMAC-SHA256 hashes of (card_number + cardholder_name) to
+    unique payment identity tokens (pi_<uuid>).
+    """
+
+    __tablename__ = "payment_identity_mappings"
+
+    # Primary key: payment identity token (format: pi_<uuid>)
+    payment_identity_token: Mapped[str] = mapped_column(
+        String(64), primary_key=True, comment="Identity token ID in format pi_<uuid>"
+    )
+
+    # Card hash: HMAC-SHA256 of card details (unique per card)
+    card_hash: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        unique=True,
+        index=True,
+        comment="HMAC-SHA256 hash of card_number + cardholder_name",
+    )
+
+    # Lifecycle timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        comment="Mapping creation timestamp",
+    )
+
+    last_used_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        comment="Last time this identity was used",
+    )

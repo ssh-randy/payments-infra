@@ -15,6 +15,7 @@ from payment_token.infrastructure.models import (
     PaymentToken as PaymentTokenModel,
     TokenIdempotencyKey,
     EncryptionKey as EncryptionKeyModel,
+    PaymentIdentityMapping,
 )
 from payment_token.domain.token import PaymentToken, TokenMetadata
 
@@ -302,3 +303,155 @@ class EncryptionKeyRepository:
 
         self.session.add(key_model)
         self.session.flush()
+
+
+class PaymentIdentityRepository:
+    """Repository for payment identity mapping operations.
+
+    Handles storage and retrieval of payment identity tokens based on
+    card hash lookups.
+    """
+
+    def __init__(self, session: Session):
+        """Initialize repository with database session.
+
+        Args:
+            session: SQLAlchemy database session
+        """
+        self.session = session
+
+    def get_or_create_identity_token(
+        self, card_hash: str
+    ) -> tuple[str, bool]:
+        """Get existing identity token or create new one for the given card hash.
+
+        Args:
+            card_hash: HMAC-SHA256 hash (64-char hex string)
+
+        Returns:
+            Tuple of (payment_identity_token, created)
+            - payment_identity_token: The identity token (pi_<uuid>)
+            - created: True if new record was created, False if existing found
+
+        Raises:
+            ValueError: If card_hash is invalid format
+        """
+        # Validate card_hash format (64 hex characters)
+        if not self._is_valid_card_hash(card_hash):
+            raise ValueError(f"Invalid card_hash format: must be 64 hex characters")
+
+        logger.debug(f"Looking up identity token for card_hash: {card_hash[:8]}...")
+
+        # Try to find existing record
+        existing = (
+            self.session.query(PaymentIdentityMapping)
+            .filter(PaymentIdentityMapping.card_hash == card_hash)
+            .first()
+        )
+
+        if existing:
+            # Update last_used_at timestamp
+            existing.last_used_at = datetime.utcnow()
+            self.session.flush()
+            logger.debug(f"Retrieved existing identity token: {existing.payment_identity_token}")
+            return (existing.payment_identity_token, False)
+
+        # Generate new payment identity token
+        import uuid
+        payment_identity_token = f"pi_{uuid.uuid4()}"
+
+        # Try to insert new record (optimistic locking)
+        try:
+            new_mapping = PaymentIdentityMapping(
+                payment_identity_token=payment_identity_token,
+                card_hash=card_hash,
+                created_at=datetime.utcnow(),
+                last_used_at=datetime.utcnow(),
+            )
+            self.session.add(new_mapping)
+            self.session.flush()
+            logger.info(f"Created new payment identity token for hash: {card_hash[:8]}...")
+            return (payment_identity_token, True)
+        except IntegrityError:
+            # Race condition: record was created by another transaction
+            self.session.rollback()
+            logger.debug(f"Race condition detected for card_hash: {card_hash[:8]}...")
+
+            # Query for the existing record
+            existing = (
+                self.session.query(PaymentIdentityMapping)
+                .filter(PaymentIdentityMapping.card_hash == card_hash)
+                .one()
+            )
+            existing.last_used_at = datetime.utcnow()
+            self.session.flush()
+            logger.debug(f"Retrieved existing identity token after race: {existing.payment_identity_token}")
+            return (existing.payment_identity_token, False)
+
+    def get_identity_token_by_hash(self, card_hash: str) -> Optional[str]:
+        """Look up identity token by card hash.
+
+        Args:
+            card_hash: HMAC-SHA256 hash (64-char hex string)
+
+        Returns:
+            payment_identity_token if found, None otherwise
+        """
+        logger.debug(f"Looking up identity token by hash: {card_hash[:8]}...")
+
+        mapping = (
+            self.session.query(PaymentIdentityMapping)
+            .filter(PaymentIdentityMapping.card_hash == card_hash)
+            .first()
+        )
+
+        if mapping:
+            logger.debug(f"Found identity token: {mapping.payment_identity_token}")
+            return mapping.payment_identity_token
+
+        logger.debug("No identity token found for hash")
+        return None
+
+    def update_last_used(self, payment_identity_token: str) -> None:
+        """Update last_used_at timestamp for an identity token.
+
+        Args:
+            payment_identity_token: The identity token to update
+
+        Raises:
+            ValueError: If token not found
+        """
+        logger.debug(f"Updating last_used_at for token: {payment_identity_token}")
+
+        mapping = (
+            self.session.query(PaymentIdentityMapping)
+            .filter(PaymentIdentityMapping.payment_identity_token == payment_identity_token)
+            .first()
+        )
+
+        if not mapping:
+            raise ValueError(f"Payment identity token not found: {payment_identity_token}")
+
+        mapping.last_used_at = datetime.utcnow()
+        self.session.flush()
+        logger.debug(f"Updated last_used_at for token: {payment_identity_token}")
+
+    def _is_valid_card_hash(self, card_hash: str) -> bool:
+        """Validate card_hash format.
+
+        Args:
+            card_hash: Hash string to validate
+
+        Returns:
+            True if valid 64-character hex string, False otherwise
+        """
+        if not isinstance(card_hash, str):
+            return False
+        if len(card_hash) != 64:
+            return False
+        try:
+            # Try to parse as hexadecimal
+            int(card_hash, 16)
+            return True
+        except ValueError:
+            return False
