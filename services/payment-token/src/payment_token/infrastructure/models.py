@@ -233,3 +233,41 @@ class DecryptAuditLog(Base):
         Index("idx_token_created", "payment_token", "created_at"),
         # Note: Table partitioning by month would be defined in the Alembic migration
     )
+
+
+class CardIdentityToken(Base):
+    """
+    Card identity token mapping table.
+
+    Stores deterministic mapping from card hash to identity token UUID.
+    Enables consistent identification of the same card across multiple tokenizations
+    without storing any PCI data.
+    """
+
+    __tablename__ = "card_identity_tokens"
+
+    # Primary key: HMAC-SHA256 hash of card_number|cardholder_name
+    card_hash: Mapped[str] = mapped_column(
+        String(64),
+        primary_key=True,
+        comment="HMAC-SHA256 hash (hex) of card_number|cardholder_name",
+    )
+
+    # Identity token UUID (standard UUID format, not pt_ prefixed)
+    identity_token: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        nullable=False,
+        unique=True,
+        comment="Identity token UUID for this card",
+    )
+
+    # Timestamp when first created
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        comment="First time this card was seen",
+    )
+
+    # Index for reverse lookups (UUID -> hash)
+    __table_args__ = (Index("idx_identity_token", "identity_token"),)

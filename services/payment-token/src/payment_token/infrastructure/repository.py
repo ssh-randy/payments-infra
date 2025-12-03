@@ -15,6 +15,7 @@ from payment_token.infrastructure.models import (
     PaymentToken as PaymentTokenModel,
     TokenIdempotencyKey,
     EncryptionKey as EncryptionKeyModel,
+    CardIdentityToken as CardIdentityTokenModel,
 )
 from payment_token.domain.token import PaymentToken, TokenMetadata
 
@@ -302,3 +303,116 @@ class EncryptionKeyRepository:
 
         self.session.add(key_model)
         self.session.flush()
+
+
+class CardIdentityTokenRepository:
+    """Repository for card identity token database operations.
+
+    Handles lookup and creation of identity tokens based on card hashes.
+    """
+
+    def __init__(self, session: Session):
+        """Initialize repository with database session.
+
+        Args:
+            session: SQLAlchemy database session
+        """
+        self.session = session
+
+    def get_by_card_hash(self, card_hash: str) -> Optional[str]:
+        """Retrieve identity token by card hash.
+
+        Args:
+            card_hash: HMAC-SHA256 hash (hex string) of card data
+
+        Returns:
+            Identity token UUID if found, None otherwise
+        """
+        logger.debug(f"Looking up identity token for card hash: {card_hash[:8]}...")
+
+        record = (
+            self.session.query(CardIdentityTokenModel)
+            .filter(CardIdentityTokenModel.card_hash == card_hash)
+            .first()
+        )
+
+        if not record:
+            logger.debug("No existing identity token found for card hash")
+            return None
+
+        logger.debug(f"Found existing identity token: {record.identity_token}")
+        return record.identity_token
+
+    def create(self, card_hash: str, identity_token: str) -> None:
+        """Create new card identity token mapping.
+
+        Args:
+            card_hash: HMAC-SHA256 hash (hex string) of card data
+            identity_token: UUID string to associate with this card
+
+        Raises:
+            IntegrityError: If card_hash already exists (duplicate)
+        """
+        logger.info(f"Creating identity token mapping for card hash: {card_hash[:8]}...")
+
+        record = CardIdentityTokenModel(
+            card_hash=card_hash,
+            identity_token=identity_token,
+            created_at=datetime.utcnow(),
+        )
+
+        self.session.add(record)
+        self.session.flush()  # Flush to check for integrity errors
+
+        logger.debug("Identity token mapping created successfully")
+
+    def get_or_create(self, card_hash: str, identity_token: str) -> str:
+        """Get existing identity token or create new one atomically.
+
+        This method handles race conditions by attempting insert first,
+        then falling back to select if insertion fails due to duplicate key.
+
+        Args:
+            card_hash: HMAC-SHA256 hash (hex string) of card data
+            identity_token: UUID string to use if creating new mapping
+
+        Returns:
+            Identity token UUID (existing or newly created)
+
+        Raises:
+            Exception: If database operation fails for reasons other than duplicate key
+        """
+        logger.debug(f"Get-or-create identity token for card hash: {card_hash[:8]}...")
+
+        try:
+            # Try to insert new record
+            record = CardIdentityTokenModel(
+                card_hash=card_hash,
+                identity_token=identity_token,
+                created_at=datetime.utcnow(),
+            )
+            self.session.add(record)
+            self.session.flush()
+
+            logger.debug(f"Created new identity token: {identity_token}")
+            return identity_token
+
+        except IntegrityError:
+            # Card hash already exists, roll back and fetch existing
+            logger.debug("Card hash already exists, fetching existing identity token")
+            self.session.rollback()
+
+            existing = (
+                self.session.query(CardIdentityTokenModel)
+                .filter(CardIdentityTokenModel.card_hash == card_hash)
+                .first()
+            )
+
+            if not existing:
+                # This should never happen, but handle it defensively
+                raise RuntimeError(
+                    f"Card hash exists but could not be retrieved: {card_hash[:8]}..."
+                )
+
+            logger.debug(f"Using existing identity token: {existing.identity_token}")
+            return existing.identity_token
