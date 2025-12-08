@@ -17,7 +17,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy.sql import func
+from sqlalchemy.sql import func, text
 
 from payment_token.infrastructure.database import Base
 
@@ -80,10 +80,45 @@ class PaymentToken(Base):
         "metadata", JSON, nullable=True, comment="Non-sensitive metadata (card_brand, last4, etc.)"
     )
 
+    # Saved card fields
+    customer_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False), nullable=True, comment="Customer UUID - required when is_saved=true"
+    )
+
+    is_saved: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false", comment="Whether this token represents a saved card"
+    )
+
+    card_label: Mapped[str | None] = mapped_column(
+        String(255), nullable=True, comment='Optional display name for saved card (e.g., "Personal Visa")'
+    )
+
+    is_default: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false",
+        comment="Whether this is the default payment method for customer+restaurant"
+    )
+
+    last_used_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True,
+        comment="Timestamp of last successful authorization with this token"
+    )
+
     # Indexes for query performance
     __table_args__ = (
         Index("idx_restaurant_created", "restaurant_id", "created_at"),
         Index("idx_expires_at", "expires_at"),
+        # Partial index for saved cards queries
+        Index(
+            "idx_customer_saved_tokens",
+            "customer_id", "restaurant_id", "is_saved", "created_at",
+            postgresql_where=text("is_saved = TRUE")
+        ),
+        # Partial index for default card lookup
+        Index(
+            "idx_customer_default_token",
+            "customer_id", "restaurant_id",
+            postgresql_where=text("is_default = TRUE")
+        ),
     )
 
     def is_expired(self) -> bool:
